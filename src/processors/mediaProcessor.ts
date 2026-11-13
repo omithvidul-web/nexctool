@@ -1,0 +1,862 @@
+import type { ProcessOptions, ProcessResult } from './types';
+import { calculateSavingsPercent, formatBytes, replaceExtension } from '../utils/formatters';
+import { encodeAnimatedGif } from '../utils/gifEncoder';
+import { applyId3v2Metadata, encodeWavBufferWithMeta } from '../utils/id3Helper';
+
+function toBinaryBlob(bytes: Uint8Array, mimeType: string): Blob {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return new Blob([copy.buffer], { type: mimeType });
+}
+
+function createAudioContext(): AudioContext {
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  return new AudioCtx();
+}
+
+function encodeWavFromAudioBuffer(buffer: AudioBuffer): Uint8Array {
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    channels.push(buffer.getChannelData(c));
+  }
+  return encodeWavBufferWithMeta(channels, buffer.sampleRate);
+}
+
+async function encodeMp3FromAudioBuffer(buffer: AudioBuffer, kbps = 128): Promise<Uint8Array> {
+  const { Mp3Encoder } = await import('@breezystack/lamejs');
+  const channels = Math.min(2, Math.max(1, buffer.numberOfChannels));
+  const encoder = new Mp3Encoder(channels, buffer.sampleRate, kbps);
+
+  const floatToInt16 = (f32: Float32Array): Int16Array => {
+    const out = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) {
+      const s = Math.max(-1, Math.min(1, f32[i]));
+      out[i] = s < 0 ? Math.round(s * 0x8000) : Math.round(s * 0x7fff);
+    }
+    return out;
+  };
+
+  const left = floatToInt16(buffer.getChannelData(0));
+  const right = channels > 1 ? floatToInt16(buffer.getChannelData(1)) : undefined;
+
+  const mp3Parts: Uint8Array[] = [];
+  const blockSize = 1152;
+  for (let i = 0; i < left.length; i += blockSize) {
+    const lChunk = left.subarray(i, i + blockSize);
+    const rChunk = right ? right.subarray(i, i + blockSize) : undefined;
+    const encoded = encoder.encodeBuffer(lChunk, rChunk);
+    if (encoded.length > 0) mp3Parts.push(new Uint8Array(encoded));
+  }
+  const end = encoder.flush();
+  if (end.length > 0) mp3Parts.push(new Uint8Array(end));
+
+  const totalLen = mp3Parts.reduce((acc, p) => acc + p.length, 0);
+  const out = new Uint8Array(totalLen);
+  let offset = 0;
+  for (const part of mp3Parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+async function resampleAudioBuffer(
+  buffer: AudioBuffer,
+  targetRate: number,
+  targetChannels: number
+): Promise<AudioBuffer> {
+  if (buffer.sampleRate === targetRate && buffer.numberOfChannels === targetChannels) {
+    return buffer;
+  }
+  const frameCount = Math.max(1, Math.ceil(buffer.duration * targetRate));
+  const offline = new OfflineAudioContext(targetChannels, frameCount, targetRate);
+  const src = offline.createBufferSource();
+  src.buffer = buffer;
+  src.connect(offline.destination);
+  src.start(0);
+  return offline.startRendering();
+}
+
+function removeSilentWindows(buffer: AudioBuffer, threshold = 0.012): AudioBuffer {
+  const sr = buffer.sampleRate;
+  const winSamples = Math.max(256, Math.round(sr * 0.02)); // 20ms windows
+  const chCount = buffer.numberOfChannels;
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < chCount; c++) {
+    channels.push(buffer.getChannelData(c));
+  }
+
+  const totalWindows = Math.ceil(buffer.length / winSamples);
+  const activeMask = new Uint8Array(totalWindows);
+
+  for (let w = 0; w < totalWindows; w++) {
+    const start = w * winSamples;
+    const end = Math.min(buffer.length, start + winSamples);
+    let sumSq = 0;
+    let count = 0;
+    for (let i = start; i < end; i++) {
+      for (let c = 0; c < chCount; c++) {
+        const v = channels[c][i];
+        sumSq += v * v;
+        count++;
+      }
+    }
+    const rms = count > 0 ? Math.sqrt(sumSq / count) : 0;
+    if (rms >= threshold) {
+      // Keep 2 windows before and after speech/sound for natural transitions
+      for (let pad = Math.max(0, w - 2); pad <= Math.min(totalWindows - 1, w + 2); pad++) {
+        activeMask[pad] = 1;
+      }
+    }
+  }
+
+  let keptSamples = 0;
+  for (let w = 0; w < totalWindows; w++) {
+    if (activeMask[w]) {
+      const start = w * winSamples;
+      keptSamples += Math.min(buffer.length, start + winSamples) - start;
+    }
+  }
+
+  if (keptSamples === 0) {
+    return buffer;
+  }
+
+  const offline = new OfflineAudioContext(chCount, keptSamples, sr);
+  const outBuf = offline.createBuffer(chCount, keptSamples, sr);
+  for (let c = 0; c < chCount; c++) {
+    const dest = outBuf.getChannelData(c);
+    const src = channels[c];
+    let writeOffset = 0;
+    for (let w = 0; w < totalWindows; w++) {
+      if (!activeMask[w]) continue;
+      const start = w * winSamples;
+      const end = Math.min(buffer.length, start + winSamples);
+      dest.set(src.subarray(start, end), writeOffset);
+      writeOffset += end - start;
+    }
+  }
+  return outBuf;
+}
+
+function pickSupportedVideoMime(preferMp4: boolean): { mime: string; ext: 'mp4' | 'webm' } {
+  const candidates = preferMp4
+    ? [
+        { mime: 'video/mp4;codecs=avc1', ext: 'mp4' as const },
+        { mime: 'video/mp4', ext: 'mp4' as const },
+        { mime: 'video/webm;codecs=vp9,opus', ext: 'webm' as const },
+        { mime: 'video/webm;codecs=vp8,opus', ext: 'webm' as const },
+        { mime: 'video/webm', ext: 'webm' as const },
+      ]
+    : [
+        { mime: 'video/webm;codecs=vp9,opus', ext: 'webm' as const },
+        { mime: 'video/webm;codecs=vp8,opus', ext: 'webm' as const },
+        { mime: 'video/webm', ext: 'webm' as const },
+        { mime: 'video/mp4', ext: 'mp4' as const },
+      ];
+
+  if (typeof MediaRecorder === 'undefined') {
+    throw new Error('MediaRecorder API is unavailable in this browser.');
+  }
+  for (const c of candidates) {
+    if (MediaRecorder.isTypeSupported(c.mime)) return c;
+  }
+  return { mime: 'video/webm', ext: 'webm' };
+}
+
+function loadVideoMetadata(file: File): Promise<{ video: HTMLVideoElement; url: string }> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+    video.onloadeddata = () => resolve({ video, url });
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`Unable to decode video "${file.name}" in this browser.`));
+    };
+  });
+}
+
+async function transcodeVideosViaCanvas(
+  files: File[],
+  config: {
+    preferMp4: boolean;
+    targetWidth?: number;
+    targetHeight?: number;
+    rotationDeg?: 0 | 90 | 180 | 270;
+    trimStartSec?: number;
+    trimEndSec?: number;
+    speedFactor?: number;
+    videoBitsPerSecond?: number;
+    stripAudio?: boolean;
+  }
+): Promise<{ blob: Blob; ext: 'mp4' | 'webm'; width: number; height: number; mime: string }> {
+  const firstMeta = await loadVideoMetadata(files[0]);
+  const natW = firstMeta.video.videoWidth || 640;
+  const natH = firstMeta.video.videoHeight || 360;
+
+  let drawW = config.targetWidth && config.targetWidth > 0 ? config.targetWidth : natW;
+  let drawH = config.targetHeight && config.targetHeight > 0 ? config.targetHeight : Math.max(2, Math.round((natH / natW) * drawW));
+  if (!config.targetWidth && !config.targetHeight) {
+    drawW = natW;
+    drawH = natH;
+  }
+  // Ensure even pixel dimensions for hardware codecs
+  drawW = Math.max(2, Math.round(drawW / 2) * 2);
+  drawH = Math.max(2, Math.round(drawH / 2) * 2);
+
+  const rot = config.rotationDeg ?? 0;
+  const swap = rot === 90 || rot === 270;
+  const canvas = document.createElement('canvas');
+  canvas.width = swap ? drawH : drawW;
+  canvas.height = swap ? drawW : drawH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    URL.revokeObjectURL(firstMeta.url);
+    throw new Error('Canvas 2D context unavailable.');
+  }
+
+  const chosen = pickSupportedVideoMime(config.preferMp4);
+  const canvasStream = canvas.captureStream(30);
+  const tracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks()];
+
+  if (!config.stripAudio && files.length === 1) {
+    const capVideo = firstMeta.video as HTMLVideoElement & { captureStream?: () => MediaStream };
+    if (typeof capVideo.captureStream === 'function') {
+      try {
+        const audioTracks = capVideo.captureStream().getAudioTracks();
+        if (audioTracks.length > 0) tracks.push(audioTracks[0]);
+      } catch {
+        // Fallback to video-only stream when captureStream audio isn't exposed
+      }
+    }
+  }
+
+  const combinedStream = new MediaStream(tracks);
+  const recorder = new MediaRecorder(combinedStream, {
+    mimeType: chosen.mime,
+    videoBitsPerSecond: config.videoBitsPerSecond ?? 1_500_000,
+  });
+
+  const chunks: Blob[] = [];
+  recorder.ondataavailable = (ev) => {
+    if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+  };
+
+  const stoppedPromise = new Promise<Blob>((resolve) => {
+    recorder.onstop = () => resolve(new Blob(chunks, { type: chosen.mime.split(';')[0] }));
+  });
+
+  recorder.start(200);
+
+  const playSingleSegment = async (video: HTMLVideoElement, startSec: number, endSec: number) => {
+    video.playbackRate = Math.min(4, Math.max(0.25, config.speedFactor ?? 1));
+    video.muted = true; // Must stay muted to satisfy autoplay policy inside headless/modern browsers
+    if (startSec > 0 && Number.isFinite(video.duration)) {
+      video.currentTime = Math.min(startSec, Math.max(0, video.duration - 0.1));
+      await new Promise<void>((res) => {
+        video.onseeked = () => res();
+        setTimeout(res, 250);
+      });
+    }
+
+    let running = true;
+    let rafId = 0;
+    const drawFrame = () => {
+      if (!running) return;
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (rot !== 0) {
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((rot * Math.PI) / 180);
+        ctx.drawImage(video, -drawW / 2, -drawH / 2, drawW, drawH);
+      } else {
+        ctx.drawImage(video, 0, 0, drawW, drawH);
+      }
+      ctx.restore();
+      rafId = requestAnimationFrame(drawFrame);
+    };
+
+    drawFrame();
+    await video.play();
+
+    await new Promise<void>((resolve) => {
+      const limit = endSec > startSec && Number.isFinite(endSec) ? endSec : Number.POSITIVE_INFINITY;
+      const checkDone = () => {
+        if (video.ended || video.currentTime >= limit) {
+          cleanup();
+          resolve();
+        }
+      };
+      const onEnded = () => {
+        cleanup();
+        resolve();
+      };
+      // Safety ceiling (20s real-time) so ultra-long videos don't hang the browser
+      const safetyTimer = window.setTimeout(() => {
+        cleanup();
+        resolve();
+      }, 20000);
+      const cleanup = () => {
+        running = false;
+        cancelAnimationFrame(rafId);
+        video.pause();
+        video.removeEventListener('timeupdate', checkDone);
+        video.removeEventListener('ended', onEnded);
+        window.clearTimeout(safetyTimer);
+      };
+      video.addEventListener('timeupdate', checkDone);
+      video.addEventListener('ended', onEnded);
+    });
+  };
+
+  try {
+    try {
+      const dur = Number.isFinite(firstMeta.video.duration) ? firstMeta.video.duration : 10;
+      const start = Math.max(0, config.trimStartSec ?? 0);
+      const end = config.trimEndSec && config.trimEndSec > start ? Math.min(dur, config.trimEndSec) : dur;
+      await playSingleSegment(firstMeta.video, start, end);
+    } finally {
+      URL.revokeObjectURL(firstMeta.url);
+    }
+
+    for (let i = 1; i < files.length; i++) {
+      const nextMeta = await loadVideoMetadata(files[i]);
+      try {
+        const dur = Number.isFinite(nextMeta.video.duration) ? nextMeta.video.duration : 10;
+        await playSingleSegment(nextMeta.video, 0, dur);
+      } finally {
+        URL.revokeObjectURL(nextMeta.url);
+      }
+    }
+  } finally {
+    if (recorder.state !== 'inactive') {
+      recorder.stop();
+    }
+  }
+
+  const outBlob = await stoppedPromise;
+  return {
+    blob: outBlob,
+    ext: chosen.ext,
+    width: canvas.width,
+    height: canvas.height,
+    mime: chosen.mime.split(';')[0],
+  };
+}
+
+export async function processMediaTool(
+  slug: string,
+  files: File[],
+  options: ProcessOptions = {}
+): Promise<ProcessResult> {
+  const file = files[0];
+  if (!file) throw new Error('Please select a media file first.');
+
+  // 1. Audio Decoding & Pure-JS Encoding / Processing Tools
+  if (
+    slug === 'mp3-to-wav' ||
+    slug === 'wav-to-mp3' ||
+    slug === 'm4a-to-mp3' ||
+    slug === 'flac-to-mp3' ||
+    slug === 'ogg-to-mp3' ||
+    slug === 'aac-to-mp3' ||
+    slug === 'video-to-mp3' ||
+    slug === 'video-to-wav' ||
+    slug === 'audio-trimmer' ||
+    slug === 'audio-merger' ||
+    slug === 'audio-volume-changer' ||
+    slug === 'audio-speed-changer' ||
+    slug === 'audio-silence-remover' ||
+    slug === 'audio-compressor' ||
+    slug === 'audio-metadata-editor'
+  ) {
+    // Fast-path pure byte ID3v2 rewrite when input is already MP3
+    if (
+      slug === 'audio-metadata-editor' &&
+      (file.name.toLowerCase().endsWith('.mp3') || file.type === 'audio/mpeg')
+    ) {
+      const rawBytes = new Uint8Array(await file.arrayBuffer());
+      const tagged = applyId3v2Metadata(rawBytes, {
+        title: options.audioTitle || file.name.replace(/\.mp3$/i, ''),
+        artist: options.audioArtist || 'Unknown Artist',
+        album: options.audioAlbum || 'NexcTool Audio',
+      });
+      const blob = toBinaryBlob(tagged, 'audio/mpeg');
+      const filename = replaceExtension(file.name, 'tagged.mp3');
+      return {
+        files: [{ blob, filename, mimeType: 'audio/mpeg', size: blob.size }],
+        outputFilename: filename,
+        outputMimeType: 'audio/mpeg',
+        summaryLines: [
+          `Embedded ID3v2.4 metadata tags into ${filename}`,
+          `Title: ${options.audioTitle || file.name} · Artist: ${options.audioArtist || 'Unknown Artist'}`,
+        ],
+        originalTotalBytes: file.size,
+        outputTotalBytes: blob.size,
+      };
+    }
+
+    const ctx = createAudioContext();
+    try {
+      if (slug === 'audio-merger') {
+        if (files.length < 2) {
+          throw new Error('Please select at least 2 audio files to merge.');
+        }
+        const decodedList: AudioBuffer[] = [];
+        let totalOriginal = 0;
+        for (const f of files) {
+          totalOriginal += f.size;
+          decodedList.push(await ctx.decodeAudioData(await f.arrayBuffer()));
+        }
+        const targetRate = decodedList[0].sampleRate;
+        const targetChannels = Math.min(2, Math.max(...decodedList.map((b) => b.numberOfChannels)));
+        const normalized: AudioBuffer[] = [];
+        let totalFrames = 0;
+        for (const b of decodedList) {
+          const resampled = await resampleAudioBuffer(b, targetRate, targetChannels);
+          normalized.push(resampled);
+          totalFrames += resampled.length;
+        }
+        const offline = new OfflineAudioContext(targetChannels, Math.max(1, totalFrames), targetRate);
+        const merged = offline.createBuffer(targetChannels, Math.max(1, totalFrames), targetRate);
+        for (let c = 0; c < targetChannels; c++) {
+          const dest = merged.getChannelData(c);
+          let pos = 0;
+          for (const buf of normalized) {
+            dest.set(buf.getChannelData(Math.min(c, buf.numberOfChannels - 1)), pos);
+            pos += buf.length;
+          }
+        }
+        const wavBytes = encodeWavFromAudioBuffer(merged);
+        const blob = toBinaryBlob(wavBytes, 'audio/wav');
+        return {
+          files: [{ blob, filename: 'merged-audio.wav', mimeType: 'audio/wav', size: blob.size }],
+          outputFilename: 'merged-audio.wav',
+          outputMimeType: 'audio/wav',
+          summaryLines: [
+            `Merged ${files.length} audio tracks (${merged.duration.toFixed(2)}s · ${targetRate} Hz)`,
+          ],
+          originalTotalBytes: totalOriginal,
+          outputTotalBytes: blob.size,
+        };
+      }
+
+      const decoded = await ctx.decodeAudioData(await file.arrayBuffer());
+
+      if (slug === 'mp3-to-wav' || slug === 'video-to-wav') {
+        const wavBytes = encodeWavFromAudioBuffer(decoded);
+        const blob = toBinaryBlob(wavBytes, 'audio/wav');
+        const filename = replaceExtension(file.name, 'wav');
+        return {
+          files: [{ blob, filename, mimeType: 'audio/wav', size: blob.size }],
+          outputFilename: filename,
+          outputMimeType: 'audio/wav',
+          summaryLines: [
+            `Extracted/decoded ${decoded.duration.toFixed(2)}s PCM WAV (${decoded.sampleRate} Hz · ${decoded.numberOfChannels} ch)`,
+          ],
+          originalTotalBytes: file.size,
+          outputTotalBytes: blob.size,
+        };
+      }
+
+      if (
+        slug === 'wav-to-mp3' ||
+        slug === 'm4a-to-mp3' ||
+        slug === 'flac-to-mp3' ||
+        slug === 'ogg-to-mp3' ||
+        slug === 'aac-to-mp3' ||
+        slug === 'video-to-mp3' ||
+        slug === 'audio-metadata-editor'
+      ) {
+        let mp3Bytes = await encodeMp3FromAudioBuffer(decoded, 128);
+        if (slug === 'audio-metadata-editor') {
+          mp3Bytes = applyId3v2Metadata(mp3Bytes, {
+            title: options.audioTitle || file.name,
+            artist: options.audioArtist || 'Unknown Artist',
+            album: options.audioAlbum || 'NexcTool Audio',
+          });
+        }
+        const blob = toBinaryBlob(mp3Bytes, 'audio/mpeg');
+        const filename = replaceExtension(file.name, 'mp3');
+        return {
+          files: [{ blob, filename, mimeType: 'audio/mpeg', size: blob.size }],
+          outputFilename: filename,
+          outputMimeType: 'audio/mpeg',
+          summaryLines: [
+            `Encoded ${decoded.duration.toFixed(2)}s audio to 128 kbps MP3 (${formatBytes(blob.size)})`,
+          ],
+          originalTotalBytes: file.size,
+          outputTotalBytes: blob.size,
+        };
+      }
+
+      if (slug === 'audio-trimmer') {
+        const startSec = Math.max(0, Math.min(decoded.duration - 0.05, options.trimStartSec ?? 0));
+        const rawEnd = options.trimEndSec && options.trimEndSec > startSec ? options.trimEndSec : decoded.duration;
+        const endSec = Math.min(decoded.duration, rawEnd);
+        const startSample = Math.floor(startSec * decoded.sampleRate);
+        const endSample = Math.max(startSample + 1, Math.floor(endSec * decoded.sampleRate));
+        const length = endSample - startSample;
+        const channels: Float32Array[] = [];
+        for (let c = 0; c < decoded.numberOfChannels; c++) {
+          channels.push(decoded.getChannelData(c).subarray(startSample, endSample));
+        }
+        const wavBytes = encodeWavBufferWithMeta(channels, decoded.sampleRate);
+        const blob = toBinaryBlob(wavBytes, 'audio/wav');
+        const filename = replaceExtension(file.name, 'trimmed.wav');
+        return {
+          files: [{ blob, filename, mimeType: 'audio/wav', size: blob.size }],
+          outputFilename: filename,
+          outputMimeType: 'audio/wav',
+          summaryLines: [
+            `Trimmed ${startSec.toFixed(2)}s → ${endSec.toFixed(2)}s (${(length / decoded.sampleRate).toFixed(2)}s output)`,
+          ],
+          originalTotalBytes: file.size,
+          outputTotalBytes: blob.size,
+        };
+      }
+
+      if (slug === 'audio-volume-changer') {
+        const pct = Math.min(300, Math.max(10, options.volumePercent ?? 150));
+        const gain = pct / 100;
+        const channels: Float32Array[] = [];
+        for (let c = 0; c < decoded.numberOfChannels; c++) {
+          const src = decoded.getChannelData(c);
+          const out = new Float32Array(src.length);
+          for (let i = 0; i < src.length; i++) {
+            out[i] = Math.max(-1, Math.min(1, src[i] * gain));
+          }
+          channels.push(out);
+        }
+        const wavBytes = encodeWavBufferWithMeta(channels, decoded.sampleRate);
+        const blob = toBinaryBlob(wavBytes, 'audio/wav');
+        const filename = replaceExtension(file.name, `vol-${pct}.wav`);
+        return {
+          files: [{ blob, filename, mimeType: 'audio/wav', size: blob.size }],
+          outputFilename: filename,
+          outputMimeType: 'audio/wav',
+          summaryLines: [`Adjusted audio gain to ${pct}% (${decoded.duration.toFixed(2)}s)`],
+          originalTotalBytes: file.size,
+          outputTotalBytes: blob.size,
+        };
+      }
+
+      if (slug === 'audio-speed-changer') {
+        const factor = Math.min(3, Math.max(0.5, options.speedFactor ?? 1.5));
+        const targetFrames = Math.max(1, Math.ceil(decoded.length / factor));
+        const offline = new OfflineAudioContext(decoded.numberOfChannels, targetFrames, decoded.sampleRate);
+        const src = offline.createBufferSource();
+        src.buffer = decoded;
+        src.playbackRate.value = factor;
+        src.connect(offline.destination);
+        src.start(0);
+        const rendered = await offline.startRendering();
+        const wavBytes = encodeWavFromAudioBuffer(rendered);
+        const blob = toBinaryBlob(wavBytes, 'audio/wav');
+        const filename = replaceExtension(file.name, `${factor}x.wav`);
+        return {
+          files: [{ blob, filename, mimeType: 'audio/wav', size: blob.size }],
+          outputFilename: filename,
+          outputMimeType: 'audio/wav',
+          summaryLines: [
+            `Changed playback speed to ${factor}× (${decoded.duration.toFixed(2)}s → ${rendered.duration.toFixed(2)}s)`,
+          ],
+          originalTotalBytes: file.size,
+          outputTotalBytes: blob.size,
+        };
+      }
+
+      if (slug === 'audio-silence-remover') {
+        const cleaned = removeSilentWindows(decoded);
+        const wavBytes = encodeWavFromAudioBuffer(cleaned);
+        const blob = toBinaryBlob(wavBytes, 'audio/wav');
+        const filename = replaceExtension(file.name, 'nosilence.wav');
+        const trimmedSec = Math.max(0, decoded.duration - cleaned.duration);
+        return {
+          files: [{ blob, filename, mimeType: 'audio/wav', size: blob.size }],
+          outputFilename: filename,
+          outputMimeType: 'audio/wav',
+          summaryLines: [
+            `Removed ${trimmedSec.toFixed(2)}s of dead silence (${decoded.duration.toFixed(2)}s → ${cleaned.duration.toFixed(2)}s)`,
+          ],
+          originalTotalBytes: file.size,
+          outputTotalBytes: blob.size,
+        };
+      }
+
+      if (slug === 'audio-compressor') {
+        const offline = new OfflineAudioContext(
+          decoded.numberOfChannels,
+          decoded.length,
+          decoded.sampleRate
+        );
+        const src = offline.createBufferSource();
+        src.buffer = decoded;
+        const comp = offline.createDynamicsCompressor();
+        comp.threshold.value = -24;
+        comp.knee.value = 20;
+        comp.ratio.value = 6;
+        comp.attack.value = 0.005;
+        comp.release.value = 0.2;
+        src.connect(comp);
+        comp.connect(offline.destination);
+        src.start(0);
+        const compressedBuf = await offline.startRendering();
+        const mp3Bytes = await encodeMp3FromAudioBuffer(compressedBuf, 96);
+        const blob = toBinaryBlob(mp3Bytes, 'audio/mpeg');
+        const filename = replaceExtension(file.name, 'compressed.mp3');
+        const savedPct = calculateSavingsPercent(file.size, blob.size);
+        return {
+          files: [{ blob, filename, mimeType: 'audio/mpeg', size: blob.size }],
+          outputFilename: filename,
+          outputMimeType: 'audio/mpeg',
+          summaryLines: [
+            `Applied dynamic compression + 96 kbps MP3 encoding`,
+            `${formatBytes(file.size)} → ${formatBytes(blob.size)}${savedPct > 0 ? ` (${savedPct}% smaller)` : ''}`,
+          ],
+          originalTotalBytes: file.size,
+          outputTotalBytes: blob.size,
+        };
+      }
+    } finally {
+      await ctx.close();
+    }
+  }
+
+  // 2. GIF -> Video (MP4 / WebM)
+  if (slug === 'gif-to-mp4') {
+    const url = URL.createObjectURL(file);
+    const img = document.createElement('img');
+    img.src = url;
+    img.style.position = 'fixed';
+    img.style.left = '-9999px';
+    document.body.appendChild(img);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Unable to decode GIF image.'));
+      });
+      const w = Math.max(2, Math.round((img.naturalWidth || 480) / 2) * 2);
+      const h = Math.max(2, Math.round((img.naturalHeight || 320) / 2) * 2);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas 2D context unavailable.');
+
+      const chosen = pickSupportedVideoMime(true);
+      const stream = canvas.captureStream(24);
+      const recorder = new MediaRecorder(stream, { mimeType: chosen.mime, videoBitsPerSecond: 1_200_000 });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+      const done = new Promise<Blob>((res) => {
+        recorder.onstop = () => res(new Blob(chunks, { type: chosen.mime.split(';')[0] }));
+      });
+      recorder.start(150);
+
+      let active = true;
+      const pump = () => {
+        if (!active) return;
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        requestAnimationFrame(pump);
+      };
+      pump();
+      await new Promise((r) => setTimeout(r, 2500));
+      active = false;
+      recorder.stop();
+      const outBlob = await done;
+      const filename = replaceExtension(file.name, chosen.ext);
+      return {
+        files: [{ blob: outBlob, filename, mimeType: chosen.mime.split(';')[0], size: outBlob.size }],
+        outputFilename: filename,
+        outputMimeType: chosen.mime.split(';')[0],
+        summaryLines: [`Captured 2.5s animated video (${w}×${h} · .${chosen.ext.toUpperCase()})`],
+        originalTotalBytes: file.size,
+        outputTotalBytes: outBlob.size,
+      };
+    } finally {
+      img.remove();
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  // 3. Video -> Animated GIF
+  if (slug === 'video-to-gif') {
+    const { video, url } = await loadVideoMetadata(file);
+    try {
+      const dur = Number.isFinite(video.duration) && video.duration > 0 ? Math.min(4, video.duration) : 2.5;
+      const frameCount = 14;
+      const maxW = 320;
+      const natW = video.videoWidth || 480;
+      const natH = video.videoHeight || 270;
+      const w = Math.min(maxW, natW);
+      const h = Math.max(2, Math.round((natH / natW) * w));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas 2D context unavailable.');
+
+      const frames: { rgba: Uint8ClampedArray; delayCs: number }[] = [];
+      for (let i = 0; i < frameCount; i++) {
+        video.currentTime = (dur * i) / frameCount;
+        await new Promise<void>((res) => {
+          video.onseeked = () => res();
+          setTimeout(res, 250);
+        });
+        ctx.drawImage(video, 0, 0, w, h);
+        frames.push({
+          rgba: ctx.getImageData(0, 0, w, h).data,
+          delayCs: Math.max(8, Math.round((dur / frameCount) * 100)),
+        });
+      }
+
+      const gifBytes = encodeAnimatedGif(frames, w, h);
+      const blob = toBinaryBlob(gifBytes, 'image/gif');
+      const filename = replaceExtension(file.name, 'gif');
+      const previewDataUrl = await new Promise<string>((res) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result));
+        r.readAsDataURL(blob);
+      });
+
+      return {
+        files: [{ blob, filename, mimeType: 'image/gif', size: blob.size }],
+        outputFilename: filename,
+        outputMimeType: 'image/gif',
+        previewDataUrl,
+        summaryLines: [`Encoded ${frames.length}-frame animated GIF (${w}×${h}, ${dur.toFixed(1)}s clip)`],
+        originalTotalBytes: file.size,
+        outputTotalBytes: blob.size,
+      };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  // 4. Canvas + MediaRecorder Video Transforms
+  if (
+    slug === 'mp4-to-webm' ||
+    slug === 'webm-to-mp4' ||
+    slug === 'mov-to-mp4' ||
+    slug === 'video-compressor' ||
+    slug === 'video-resizer' ||
+    slug === 'video-trimmer' ||
+    slug === 'video-speed-changer' ||
+    slug === 'video-rotator' ||
+    slug === 'video-audio-remover' ||
+    slug === 'video-merger'
+  ) {
+    if (slug === 'video-merger' && files.length < 2) {
+      throw new Error('Please select at least 2 videos to merge.');
+    }
+    const q = Math.min(95, Math.max(10, options.quality ?? 60));
+    const bps =
+      slug === 'video-compressor'
+        ? Math.round((q / 100) * 1_600_000) + 180_000
+        : 1_800_000;
+
+    const result = await transcodeVideosViaCanvas(files, {
+      preferMp4: slug === 'webm-to-mp4' || slug === 'mov-to-mp4',
+      targetWidth: slug === 'video-resizer' ? options.width : undefined,
+      targetHeight: slug === 'video-resizer' ? options.height : undefined,
+      rotationDeg: slug === 'video-rotator' ? (options.rotation ?? 90) : 0,
+      trimStartSec: slug === 'video-trimmer' ? options.trimStartSec : undefined,
+      trimEndSec: slug === 'video-trimmer' ? options.trimEndSec : undefined,
+      speedFactor: slug === 'video-speed-changer' ? options.speedFactor : 1,
+      videoBitsPerSecond: bps,
+      stripAudio: slug === 'video-audio-remover',
+    });
+
+    const filename =
+      slug === 'video-merger'
+        ? `merged-video.${result.ext}`
+        : replaceExtension(file.name, `${slug === 'mp4-to-webm' || slug === 'webm-to-mp4' || slug === 'mov-to-mp4' ? '' : `${slug.replace('video-', '')}.`}${result.ext}`.replace(/^\./, ''));
+    const totalOrig = files.reduce((a, f) => a + f.size, 0);
+    const savedPct = calculateSavingsPercent(totalOrig, result.blob.size);
+    return {
+      files: [{ blob: result.blob, filename, mimeType: result.mime, size: result.blob.size }],
+      outputFilename: filename,
+      outputMimeType: result.mime,
+      summaryLines: [
+        `Rendered ${result.width}×${result.height} .${result.ext.toUpperCase()} locally in browser`,
+        `${formatBytes(totalOrig)} → ${formatBytes(result.blob.size)}${savedPct > 0 ? ` (${savedPct}% smaller)` : ''}`,
+      ],
+      originalTotalBytes: totalOrig,
+      outputTotalBytes: result.blob.size,
+    };
+  }
+
+  // 5. Video Thumbnail / Frame / Metadata (fast seek capture)
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = objectUrl;
+
+    await new Promise<void>((resolve, reject) => {
+      video.onloadeddata = () => resolve();
+      video.onerror = () => reject(new Error('This video codec is not supported by your browser.'));
+    });
+
+    if (slug === 'video-metadata-viewer') {
+      const report = [
+        `File name: ${file.name}`,
+        `File size: ${formatBytes(file.size)}`,
+        `MIME type: ${file.type || 'unknown'}`,
+        `Resolution: ${video.videoWidth} × ${video.videoHeight}`,
+        `Duration: ${Number.isFinite(video.duration) ? `${video.duration.toFixed(2)} seconds` : 'unknown'}`,
+      ].join('\n');
+      const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+      const filename = replaceExtension(file.name, 'metadata.txt');
+      return {
+        files: [{ blob, filename, mimeType: 'text/plain', size: blob.size }],
+        textOutput: report,
+        outputFilename: filename,
+        summaryLines: [`${video.videoWidth}×${video.videoHeight} · ${video.duration.toFixed(1)}s`],
+      };
+    }
+
+    const seekTarget = Math.min(1, Math.max(0, (video.duration || 1) * 0.1));
+    video.currentTime = seekTarget;
+    await new Promise<void>((resolve) => {
+      video.onseeked = () => resolve();
+      setTimeout(resolve, 400);
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D context unavailable.');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Failed to capture video frame.'))), 'image/png');
+    });
+    const filename = replaceExtension(file.name, 'thumbnail.png');
+    return {
+      files: [{ blob, filename, mimeType: 'image/png', size: blob.size }],
+      outputFilename: filename,
+      outputMimeType: 'image/png',
+      previewDataUrl: canvas.toDataURL('image/png'),
+      summaryLines: [`Captured ${canvas.width}×${canvas.height} PNG frame at ${seekTarget.toFixed(2)}s`],
+      originalTotalBytes: file.size,
+      outputTotalBytes: blob.size,
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "NexcTool - Online File Tools",
+  "description": "200 free, 100% private online file tools that run entirely inside your browser. Your file never leaves your device.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
