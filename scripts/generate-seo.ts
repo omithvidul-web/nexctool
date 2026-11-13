@@ -48,11 +48,7 @@ Allow: /
 Sitemap: ${BASE_URL}/sitemap.xml
 `;
 
-const redirects = `/* /index.html 200
-`;
-
 writeFileSync(resolve(publicDir, 'sitemap.xml'), sitemapXml, 'utf8');
 writeFileSync(resolve(publicDir, 'robots.txt'), robotsTxt, 'utf8');
-writeFileSync(resolve(publicDir, '_redirects'), redirects, 'utf8');
 
-console.log(`Generated sitemap.xml (${urls.length} URLs), robots.txt, and _redirects in public/`);
+console.log(`Generated sitemap.xml (${urls.length} URLs), robots.txt in public/`);
