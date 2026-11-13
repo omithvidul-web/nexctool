@@ -38,7 +38,12 @@ export function SeoHead({
     upsertMeta('meta[name="twitter:title"]', 'name', 'twitter:title', title);
     upsertMeta('meta[name="twitter:description"]', 'name', 'twitter:description', description);
 
-    const origin = window.location.origin;
+    const host = window.location.hostname;
+    const isProdDomain =
+      host === 'nexctool.com' ||
+      host === 'www.nexctool.com' ||
+      host.endsWith('.pages.dev');
+    const origin = isProdDomain ? 'https://nexctool.com' : window.location.origin;
     const imageUrl = imagePath.startsWith('http') ? imagePath : `${origin}${imagePath}`;
     upsertMeta('meta[property="og:image"]', 'property', 'og:image', imageUrl);
     upsertMeta('meta[name="twitter:image"]', 'name', 'twitter:image', imageUrl);

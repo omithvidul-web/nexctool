@@ -2,7 +2,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CATEGORIES, TOOLS } from '../src/data/tools';
 
-const BASE_URL = process.env.SITE_URL || 'https://nexctool.pages.dev';
+const BASE_URL = process.env.SITE_URL || 'https://nexctool.com';
 const publicDir = resolve(process.cwd(), 'public');
 mkdirSync(publicDir, { recursive: true });
 
