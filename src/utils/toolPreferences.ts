@@ -92,3 +92,15 @@ export function recordRecentTool(slug: string): string[] {
   }
   return next;
 }
+
+export function clearRecentTools(): void {
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.removeItem(RECENT_KEY);
+      notifyPrefsChanged();
+    } catch {
+      // Ignore storage errors cleanly
+    }
+  }
+}
+

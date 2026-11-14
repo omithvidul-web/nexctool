@@ -9,6 +9,7 @@ import {
   Lock,
   Search,
   Star,
+  Trash2,
   WifiOff,
   Zap,
 } from 'lucide-react';
@@ -18,6 +19,7 @@ import { CategoryCardImage } from '../components/CategoryCardImage';
 import { SeoHead } from '../components/SeoHead';
 import {
   PREFS_CHANGED_EVENT,
+  clearRecentTools,
   getPinnedSlugs,
   getRecentSlugs,
   togglePinnedTool,
@@ -216,16 +218,30 @@ export function HomePage() {
           data-testid="pinned-recent-section"
           className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-2"
         >
-          <div className="flex items-center justify-between gap-4 mb-5">
-            <div className="flex items-center gap-2">
-              <Star className="w-4 h-4 text-amber-500 fill-amber-400" aria-hidden="true" />
-              <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+          <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-4 mb-5">
+            <div className="flex items-center gap-2 min-w-0">
+              <Star className="w-4 h-4 text-amber-500 fill-amber-400 shrink-0" aria-hidden="true" />
+              <h2 className="text-[15px] sm:text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
                 Your Pinned & Recent Tools
               </h2>
             </div>
-            <span className="text-xs text-slate-500 dark:text-slate-400 hidden sm:inline">
-              Saved privately on this device
-            </span>
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="text-xs text-slate-500 dark:text-slate-400 hidden sm:inline">
+                Saved privately on this device
+              </span>
+              {quickTools.recent.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => clearRecentTools()}
+                  data-testid="clear-recent-tools"
+                  aria-label="Clear recent tools while keeping pinned tools"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-300 bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-500/60 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50/70 dark:hover:bg-rose-950/30 shadow-2xs transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Clear recent</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
