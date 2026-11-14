@@ -2,6 +2,7 @@ import type { ProcessOptions, ProcessResult } from './types';
 import { calculateSavingsPercent, formatBytes, replaceExtension } from '../utils/formatters';
 import { encodeAnimatedGif } from '../utils/gifEncoder';
 import { applyId3v2Metadata, encodeWavBufferWithMeta } from '../utils/id3Helper';
+import { computeVideoCompressionPlan, getVideoMimeCandidates } from '../utils/videoCompression';
 
 function toBinaryBlob(bytes: Uint8Array, mimeType: string): Blob {
   const copy = new Uint8Array(bytes.byteLength);
@@ -141,44 +142,116 @@ function removeSilentWindows(buffer: AudioBuffer, threshold = 0.012): AudioBuffe
   return outBuf;
 }
 
-function pickSupportedVideoMime(preferMp4: boolean): { mime: string; ext: 'mp4' | 'webm' } {
-  const candidates = preferMp4
-    ? [
-        { mime: 'video/mp4;codecs=avc1', ext: 'mp4' as const },
-        { mime: 'video/mp4', ext: 'mp4' as const },
-        { mime: 'video/webm;codecs=vp9,opus', ext: 'webm' as const },
-        { mime: 'video/webm;codecs=vp8,opus', ext: 'webm' as const },
-        { mime: 'video/webm', ext: 'webm' as const },
-      ]
-    : [
-        { mime: 'video/webm;codecs=vp9,opus', ext: 'webm' as const },
-        { mime: 'video/webm;codecs=vp8,opus', ext: 'webm' as const },
-        { mime: 'video/webm', ext: 'webm' as const },
-        { mime: 'video/mp4', ext: 'mp4' as const },
-      ];
-
+function pickSupportedVideoMime(
+  preferMp4: boolean,
+  hasAudio = true
+): { mime: string; ext: 'mp4' | 'webm' } {
   if (typeof MediaRecorder === 'undefined') {
     throw new Error('MediaRecorder API is unavailable in this browser.');
   }
+  const candidates = getVideoMimeCandidates(preferMp4, hasAudio);
   for (const c of candidates) {
     if (MediaRecorder.isTypeSupported(c.mime)) return c;
   }
-  return { mime: 'video/webm', ext: 'webm' };
+  return preferMp4
+    ? { mime: 'video/mp4', ext: 'mp4' }
+    : { mime: 'video/webm', ext: 'webm' };
 }
 
-function loadVideoMetadata(file: File): Promise<{ video: HTMLVideoElement; url: string }> {
+function createSafeMediaRecorder(
+  stream: MediaStream,
+  fallbackVideoOnlyStream: MediaStream,
+  preferMp4: boolean,
+  hasAudio: boolean,
+  videoBitsPerSecond: number
+): { recorder: MediaRecorder; mime: string; ext: 'mp4' | 'webm' } {
+  const chosen = pickSupportedVideoMime(preferMp4, hasAudio);
+  const attempts: Array<{ s: MediaStream; opts: MediaRecorderOptions; info: { mime: string; ext: 'mp4' | 'webm' } }> = [
+    { s: stream, opts: { mimeType: chosen.mime, videoBitsPerSecond }, info: chosen },
+    { s: stream, opts: { mimeType: chosen.mime }, info: chosen },
+    { s: stream, opts: { videoBitsPerSecond }, info: chosen },
+  ];
+
+  const videoOnlyMime = pickSupportedVideoMime(preferMp4, false);
+  attempts.push(
+    { s: fallbackVideoOnlyStream, opts: { mimeType: videoOnlyMime.mime, videoBitsPerSecond }, info: videoOnlyMime },
+    { s: fallbackVideoOnlyStream, opts: { mimeType: videoOnlyMime.mime }, info: videoOnlyMime },
+    { s: fallbackVideoOnlyStream, opts: {}, info: videoOnlyMime }
+  );
+
+  let lastErr: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      const recorder = new MediaRecorder(attempt.s, attempt.opts);
+      const effectiveMime = recorder.mimeType || attempt.info.mime;
+      const ext: 'mp4' | 'webm' = effectiveMime.includes('mp4') ? 'mp4' : attempt.info.ext;
+      return { recorder, mime: effectiveMime, ext };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error('Unable to initialize browser video recorder for this format.');
+}
+
+function loadVideoMetadata(
+  file: File
+): Promise<{ video: HTMLVideoElement; url: string; cleanup: () => void }> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const video = document.createElement('video');
     video.preload = 'auto';
     video.muted = true;
+    video.defaultMuted = true;
     video.playsInline = true;
-    video.src = url;
-    video.onloadeddata = () => resolve({ video, url });
-    video.onerror = () => {
+    video.setAttribute('muted', '');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.style.cssText =
+      'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0.001;pointer-events:none;';
+    document.body.appendChild(video);
+
+    let settled = false;
+    const cleanup = () => {
+      video.pause();
+      video.removeAttribute('src');
+      video.remove();
       URL.revokeObjectURL(url);
-      reject(new Error(`Unable to decode video "${file.name}" in this browser.`));
     };
+
+    const timeoutId = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(`Timed out loading video "${file.name}". This codec may not be supported by your browser.`));
+    }, 15_000);
+
+    const onReady = () => {
+      if (settled) return;
+      if (video.videoWidth > 0 || video.readyState >= 2) {
+        settled = true;
+        window.clearTimeout(timeoutId);
+        resolve({ video, url, cleanup });
+      }
+    };
+
+    video.addEventListener('loadeddata', onReady, { once: true });
+    video.addEventListener('canplay', onReady, { once: true });
+    video.addEventListener(
+      'error',
+      () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        cleanup();
+        reject(new Error(`Unable to decode video "${file.name}" in this browser.`));
+      },
+      { once: true }
+    );
+
+    video.src = url;
+    video.load();
   });
 }
 
@@ -193,161 +266,233 @@ async function transcodeVideosViaCanvas(
     trimEndSec?: number;
     speedFactor?: number;
     videoBitsPerSecond?: number;
+    compressQuality?: number;
     stripAudio?: boolean;
   }
 ): Promise<{ blob: Blob; ext: 'mp4' | 'webm'; width: number; height: number; mime: string }> {
   const firstMeta = await loadVideoMetadata(files[0]);
-  const natW = firstMeta.video.videoWidth || 640;
-  const natH = firstMeta.video.videoHeight || 360;
-
-  let drawW = config.targetWidth && config.targetWidth > 0 ? config.targetWidth : natW;
-  let drawH = config.targetHeight && config.targetHeight > 0 ? config.targetHeight : Math.max(2, Math.round((natH / natW) * drawW));
-  if (!config.targetWidth && !config.targetHeight) {
-    drawW = natW;
-    drawH = natH;
-  }
-  // Ensure even pixel dimensions for hardware codecs
-  drawW = Math.max(2, Math.round(drawW / 2) * 2);
-  drawH = Math.max(2, Math.round(drawH / 2) * 2);
-
-  const rot = config.rotationDeg ?? 0;
-  const swap = rot === 90 || rot === 270;
-  const canvas = document.createElement('canvas');
-  canvas.width = swap ? drawH : drawW;
-  canvas.height = swap ? drawW : drawH;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    URL.revokeObjectURL(firstMeta.url);
-    throw new Error('Canvas 2D context unavailable.');
-  }
-
-  const chosen = pickSupportedVideoMime(config.preferMp4);
-  const canvasStream = canvas.captureStream(30);
-  const tracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks()];
-
-  if (!config.stripAudio && files.length === 1) {
-    const capVideo = firstMeta.video as HTMLVideoElement & { captureStream?: () => MediaStream };
-    if (typeof capVideo.captureStream === 'function') {
-      try {
-        const audioTracks = capVideo.captureStream().getAudioTracks();
-        if (audioTracks.length > 0) tracks.push(audioTracks[0]);
-      } catch {
-        // Fallback to video-only stream when captureStream audio isn't exposed
-      }
-    }
-  }
-
-  const combinedStream = new MediaStream(tracks);
-  const recorder = new MediaRecorder(combinedStream, {
-    mimeType: chosen.mime,
-    videoBitsPerSecond: config.videoBitsPerSecond ?? 1_500_000,
-  });
-
-  const chunks: Blob[] = [];
-  recorder.ondataavailable = (ev) => {
-    if (ev.data && ev.data.size > 0) chunks.push(ev.data);
-  };
-
-  const stoppedPromise = new Promise<Blob>((resolve) => {
-    recorder.onstop = () => resolve(new Blob(chunks, { type: chosen.mime.split(';')[0] }));
-  });
-
-  recorder.start(200);
-
-  const playSingleSegment = async (video: HTMLVideoElement, startSec: number, endSec: number) => {
-    video.playbackRate = Math.min(4, Math.max(0.25, config.speedFactor ?? 1));
-    video.muted = true; // Must stay muted to satisfy autoplay policy inside headless/modern browsers
-    if (startSec > 0 && Number.isFinite(video.duration)) {
-      video.currentTime = Math.min(startSec, Math.max(0, video.duration - 0.1));
-      await new Promise<void>((res) => {
-        video.onseeked = () => res();
-        setTimeout(res, 250);
-      });
-    }
-
-    let running = true;
-    let rafId = 0;
-    const drawFrame = () => {
-      if (!running) return;
-      ctx.save();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (rot !== 0) {
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate((rot * Math.PI) / 180);
-        ctx.drawImage(video, -drawW / 2, -drawH / 2, drawW, drawH);
-      } else {
-        ctx.drawImage(video, 0, 0, drawW, drawH);
-      }
-      ctx.restore();
-      rafId = requestAnimationFrame(drawFrame);
-    };
-
-    drawFrame();
-    await video.play();
-
-    await new Promise<void>((resolve) => {
-      const limit = endSec > startSec && Number.isFinite(endSec) ? endSec : Number.POSITIVE_INFINITY;
-      const checkDone = () => {
-        if (video.ended || video.currentTime >= limit) {
-          cleanup();
-          resolve();
-        }
-      };
-      const onEnded = () => {
-        cleanup();
-        resolve();
-      };
-      // Safety ceiling (20s real-time) so ultra-long videos don't hang the browser
-      const safetyTimer = window.setTimeout(() => {
-        cleanup();
-        resolve();
-      }, 20000);
-      const cleanup = () => {
-        running = false;
-        cancelAnimationFrame(rafId);
-        video.pause();
-        video.removeEventListener('timeupdate', checkDone);
-        video.removeEventListener('ended', onEnded);
-        window.clearTimeout(safetyTimer);
-      };
-      video.addEventListener('timeupdate', checkDone);
-      video.addEventListener('ended', onEnded);
-    });
-  };
+  const cleanupQueue: Array<() => void> = [firstMeta.cleanup];
 
   try {
+    const natW = firstMeta.video.videoWidth || 640;
+    const natH = firstMeta.video.videoHeight || 360;
+    const firstDur =
+      Number.isFinite(firstMeta.video.duration) && firstMeta.video.duration > 0
+        ? firstMeta.video.duration
+        : 0;
+
+    let drawW: number;
+    let drawH: number;
+    let effectiveBps = config.videoBitsPerSecond ?? 1_500_000;
+
+    if (config.compressQuality !== undefined) {
+      const plan = computeVideoCompressionPlan({
+        naturalWidth: natW,
+        naturalHeight: natH,
+        fileSizeBytes: files[0].size,
+        durationSec: firstDur,
+        quality: config.compressQuality,
+      });
+      drawW = plan.targetWidth;
+      drawH = plan.targetHeight;
+      effectiveBps = plan.videoBitsPerSecond;
+    } else {
+      drawW = config.targetWidth && config.targetWidth > 0 ? config.targetWidth : natW;
+      drawH =
+        config.targetHeight && config.targetHeight > 0
+          ? config.targetHeight
+          : Math.max(2, Math.round((natH / natW) * drawW));
+      if (!config.targetWidth && !config.targetHeight) {
+        drawW = natW;
+        drawH = natH;
+      }
+      drawW = Math.max(2, Math.round(drawW / 2) * 2);
+      drawH = Math.max(2, Math.round(drawH / 2) * 2);
+    }
+
+    const rot = config.rotationDeg ?? 0;
+    const swap = rot === 90 || rot === 270;
+    const canvas = document.createElement('canvas');
+    canvas.width = swap ? drawH : drawW;
+    canvas.height = swap ? drawW : drawH;
+    // alpha:false prevents clearRect alpha flushing bugs that produce 0-byte MediaRecorder outputs in Chromium
+    const ctx = canvas.getContext('2d', { alpha: false }) ?? canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Canvas 2D context unavailable.');
+    }
+
+    const paintVideoFrame = (videoEl: HTMLVideoElement) => {
+      if (rot !== 0) {
+        ctx.save();
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((rot * Math.PI) / 180);
+        ctx.drawImage(videoEl, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
+      } else {
+        ctx.drawImage(videoEl, 0, 0, drawW, drawH);
+      }
+    };
+
+    // Draw first frame before starting captureStream so MediaRecorder immediately has pixel data
+    paintVideoFrame(firstMeta.video);
+
+    const canvasStream = canvas.captureStream(30);
+    const tracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks()];
+    let hasAudio = false;
+
+    if (!config.stripAudio && files.length === 1) {
+      const capVideo = firstMeta.video as HTMLVideoElement & { captureStream?: () => MediaStream };
+      if (typeof capVideo.captureStream === 'function') {
+        try {
+          const audioTracks = capVideo.captureStream().getAudioTracks();
+          if (audioTracks.length > 0) {
+            tracks.push(audioTracks[0]);
+            hasAudio = true;
+          }
+        } catch {
+          // Fallback to video-only stream when captureStream audio isn't exposed
+        }
+      }
+    }
+
+    const combinedStream = new MediaStream(tracks);
+    const { recorder, mime: recorderMime, ext } = createSafeMediaRecorder(
+      combinedStream,
+      canvasStream,
+      config.preferMp4,
+      hasAudio,
+      effectiveBps
+    );
+
+    const chunks: Blob[] = [];
+    let recorderError: string | null = null;
+    recorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+    };
+    recorder.onerror = (ev) => {
+      const errObj = (ev as unknown as { error?: Error }).error;
+      recorderError = errObj?.message || 'Browser video encoder encountered an error.';
+    };
+
+    const cleanMime = recorderMime.split(';')[0] || (ext === 'mp4' ? 'video/mp4' : 'video/webm');
+    const stoppedPromise = new Promise<Blob>((resolve) => {
+      recorder.onstop = () => resolve(new Blob(chunks, { type: cleanMime }));
+    });
+
+    recorder.start(200);
+
+    const playSingleSegment = async (video: HTMLVideoElement, startSec: number, endSec: number) => {
+      const rate = Math.min(4, Math.max(0.25, config.speedFactor ?? 1));
+      video.playbackRate = rate;
+      video.muted = true; // Must stay muted to satisfy autoplay policy inside headless/mobile browsers
+      if (startSec > 0 && Number.isFinite(video.duration)) {
+        video.currentTime = Math.min(startSec, Math.max(0, video.duration - 0.1));
+        await new Promise<void>((res) => {
+          video.onseeked = () => res();
+          setTimeout(res, 250);
+        });
+      }
+
+      let running = true;
+      let rafId = 0;
+      const drawFrame = () => {
+        if (!running) return;
+        paintVideoFrame(video);
+        rafId = requestAnimationFrame(drawFrame);
+      };
+      // Fallback 30fps timer guarantees frames continue pumping if rAF is throttled
+      const backupTimer = window.setInterval(() => {
+        if (running) paintVideoFrame(video);
+      }, 33);
+
+      drawFrame();
+      await video.play();
+
+      const segDur = Math.max(1, endSec > startSec && Number.isFinite(endSec) ? endSec - startSec : 15);
+      const maxWaitMs = Math.max(30_000, Math.min(300_000, Math.ceil((segDur / rate) * 1000) + 15_000));
+
+      await new Promise<void>((resolve) => {
+        const limit = endSec > startSec && Number.isFinite(endSec) ? endSec : Number.POSITIVE_INFINITY;
+        const checkDone = () => {
+          if (video.ended || video.currentTime >= limit) {
+            cleanupSegment();
+            resolve();
+          }
+        };
+        const onEnded = () => {
+          cleanupSegment();
+          resolve();
+        };
+        const safetyTimer = window.setTimeout(() => {
+          cleanupSegment();
+          resolve();
+        }, maxWaitMs);
+        const cleanupSegment = () => {
+          running = false;
+          cancelAnimationFrame(rafId);
+          window.clearInterval(backupTimer);
+          video.pause();
+          video.removeEventListener('timeupdate', checkDone);
+          video.removeEventListener('ended', onEnded);
+          window.clearTimeout(safetyTimer);
+        };
+        video.addEventListener('timeupdate', checkDone);
+        video.addEventListener('ended', onEnded);
+      });
+    };
+
     try {
       const dur = Number.isFinite(firstMeta.video.duration) ? firstMeta.video.duration : 10;
       const start = Math.max(0, config.trimStartSec ?? 0);
       const end = config.trimEndSec && config.trimEndSec > start ? Math.min(dur, config.trimEndSec) : dur;
       await playSingleSegment(firstMeta.video, start, end);
-    } finally {
-      URL.revokeObjectURL(firstMeta.url);
-    }
 
-    for (let i = 1; i < files.length; i++) {
-      const nextMeta = await loadVideoMetadata(files[i]);
-      try {
-        const dur = Number.isFinite(nextMeta.video.duration) ? nextMeta.video.duration : 10;
-        await playSingleSegment(nextMeta.video, 0, dur);
-      } finally {
-        URL.revokeObjectURL(nextMeta.url);
+      for (let i = 1; i < files.length; i++) {
+        const nextMeta = await loadVideoMetadata(files[i]);
+        cleanupQueue.push(nextMeta.cleanup);
+        const nextDur = Number.isFinite(nextMeta.video.duration) ? nextMeta.video.duration : 10;
+        await playSingleSegment(nextMeta.video, 0, nextDur);
+      }
+    } finally {
+      if (recorder.state === 'recording') {
+        try {
+          recorder.requestData();
+        } catch {
+          // Ignore requestData errors when recorder is already stopping
+        }
+        recorder.stop();
+      } else if (recorder.state !== 'inactive') {
+        recorder.stop();
       }
     }
+
+    const outBlob = await stoppedPromise;
+    if (recorderError && outBlob.size === 0) {
+      throw new Error(recorderError);
+    }
+    if (outBlob.size === 0) {
+      throw new Error(
+        'Browser produced an empty video output. Try lowering Output Quality or converting the video to standard MP4/WebM first.'
+      );
+    }
+    return {
+      blob: outBlob,
+      ext,
+      width: canvas.width,
+      height: canvas.height,
+      mime: cleanMime,
+    };
   } finally {
-    if (recorder.state !== 'inactive') {
-      recorder.stop();
+    for (const fn of cleanupQueue) {
+      try {
+        fn();
+      } catch {
+        // Ignore cleanup errors
+      }
     }
   }
-
-  const outBlob = await stoppedPromise;
-  return {
-    blob: outBlob,
-    ext: chosen.ext,
-    width: canvas.width,
-    height: canvas.height,
-    mime: chosen.mime.split(';')[0],
-  };
 }
 
 export async function processMediaTool(
@@ -650,7 +795,7 @@ export async function processMediaTool(
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas 2D context unavailable.');
 
-      const chosen = pickSupportedVideoMime(true);
+      const chosen = pickSupportedVideoMime(true, false);
       const stream = canvas.captureStream(24);
       const recorder = new MediaRecorder(stream, { mimeType: chosen.mime, videoBitsPerSecond: 1_200_000 });
       const chunks: Blob[] = [];
@@ -691,7 +836,7 @@ export async function processMediaTool(
 
   // 3. Video -> Animated GIF
   if (slug === 'video-to-gif') {
-    const { video, url } = await loadVideoMetadata(file);
+    const { video, cleanup } = await loadVideoMetadata(file);
     try {
       const dur = Number.isFinite(video.duration) && video.duration > 0 ? Math.min(4, video.duration) : 2.5;
       const frameCount = 14;
@@ -740,7 +885,7 @@ export async function processMediaTool(
         outputTotalBytes: blob.size,
       };
     } finally {
-      URL.revokeObjectURL(url);
+      cleanup();
     }
   }
 
@@ -760,28 +905,35 @@ export async function processMediaTool(
     if (slug === 'video-merger' && files.length < 2) {
       throw new Error('Please select at least 2 videos to merge.');
     }
-    const q = Math.min(95, Math.max(10, options.quality ?? 60));
-    const bps =
-      slug === 'video-compressor'
-        ? Math.round((q / 100) * 1_600_000) + 180_000
-        : 1_800_000;
+    const q = Math.min(95, Math.max(10, options.quality ?? 70));
+    const isWebmInput = file.name.toLowerCase().endsWith('.webm') || file.type === 'video/webm';
+    const preferMp4 =
+      slug === 'webm-to-mp4' ||
+      slug === 'mov-to-mp4' ||
+      (slug === 'video-compressor' && !isWebmInput);
 
     const result = await transcodeVideosViaCanvas(files, {
-      preferMp4: slug === 'webm-to-mp4' || slug === 'mov-to-mp4',
+      preferMp4,
       targetWidth: slug === 'video-resizer' ? options.width : undefined,
       targetHeight: slug === 'video-resizer' ? options.height : undefined,
       rotationDeg: slug === 'video-rotator' ? (options.rotation ?? 90) : 0,
       trimStartSec: slug === 'video-trimmer' ? options.trimStartSec : undefined,
       trimEndSec: slug === 'video-trimmer' ? options.trimEndSec : undefined,
       speedFactor: slug === 'video-speed-changer' ? options.speedFactor : 1,
-      videoBitsPerSecond: bps,
+      videoBitsPerSecond: 1_800_000,
+      compressQuality: slug === 'video-compressor' ? q : undefined,
       stripAudio: slug === 'video-audio-remover',
     });
 
     const filename =
       slug === 'video-merger'
         ? `merged-video.${result.ext}`
-        : replaceExtension(file.name, `${slug === 'mp4-to-webm' || slug === 'webm-to-mp4' || slug === 'mov-to-mp4' ? '' : `${slug.replace('video-', '')}.`}${result.ext}`.replace(/^\./, ''));
+        : slug === 'video-compressor'
+          ? replaceExtension(file.name, `compressed.${result.ext}`)
+          : replaceExtension(
+              file.name,
+              `${slug === 'mp4-to-webm' || slug === 'webm-to-mp4' || slug === 'mov-to-mp4' ? '' : `${slug.replace('video-', '')}.`}${result.ext}`.replace(/^\./, '')
+            );
     const totalOrig = files.reduce((a, f) => a + f.size, 0);
     const savedPct = calculateSavingsPercent(totalOrig, result.blob.size);
     return {
