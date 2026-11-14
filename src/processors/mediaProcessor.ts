@@ -163,20 +163,47 @@ function createSafeMediaRecorder(
   fallbackVideoOnlyStream: MediaStream,
   preferMp4: boolean,
   hasAudio: boolean,
-  videoBitsPerSecond: number
+  videoBitsPerSecond: number,
+  audioBitsPerSecond = 96_000
 ): { recorder: MediaRecorder; mime: string; ext: 'mp4' | 'webm' } {
-  const chosen = pickSupportedVideoMime(preferMp4, hasAudio);
-  const attempts: Array<{ s: MediaStream; opts: MediaRecorderOptions; info: { mime: string; ext: 'mp4' | 'webm' } }> = [
-    { s: stream, opts: { mimeType: chosen.mime, videoBitsPerSecond }, info: chosen },
-    { s: stream, opts: { mimeType: chosen.mime }, info: chosen },
-    { s: stream, opts: { videoBitsPerSecond }, info: chosen },
-  ];
+  if (typeof MediaRecorder === 'undefined') {
+    throw new Error('MediaRecorder API is unavailable in this browser.');
+  }
 
-  const videoOnlyMime = pickSupportedVideoMime(preferMp4, false);
+  const attempts: Array<{ s: MediaStream; opts: MediaRecorderOptions; info: { mime: string; ext: 'mp4' | 'webm' } }> = [];
+
+  if (hasAudio) {
+    const audioCandidates = getVideoMimeCandidates(preferMp4, true).filter((c) =>
+      MediaRecorder.isTypeSupported(c.mime)
+    );
+    for (const candidate of audioCandidates) {
+      attempts.push(
+        { s: stream, opts: { mimeType: candidate.mime, videoBitsPerSecond, audioBitsPerSecond }, info: candidate },
+        { s: stream, opts: { mimeType: candidate.mime, videoBitsPerSecond }, info: candidate },
+        { s: stream, opts: { mimeType: candidate.mime }, info: candidate }
+      );
+    }
+    const fallbackChoice = audioCandidates[0] ?? pickSupportedVideoMime(preferMp4, true);
+    attempts.push(
+      { s: stream, opts: { videoBitsPerSecond, audioBitsPerSecond }, info: fallbackChoice },
+      { s: stream, opts: { videoBitsPerSecond }, info: fallbackChoice },
+      { s: stream, opts: {}, info: fallbackChoice }
+    );
+  }
+
+  const videoOnlyCandidates = getVideoMimeCandidates(preferMp4, false).filter((c) =>
+    MediaRecorder.isTypeSupported(c.mime)
+  );
+  const videoOnlyPrimary = videoOnlyCandidates[0] ?? pickSupportedVideoMime(preferMp4, false);
+  for (const candidate of videoOnlyCandidates) {
+    attempts.push(
+      { s: fallbackVideoOnlyStream, opts: { mimeType: candidate.mime, videoBitsPerSecond }, info: candidate },
+      { s: fallbackVideoOnlyStream, opts: { mimeType: candidate.mime }, info: candidate }
+    );
+  }
   attempts.push(
-    { s: fallbackVideoOnlyStream, opts: { mimeType: videoOnlyMime.mime, videoBitsPerSecond }, info: videoOnlyMime },
-    { s: fallbackVideoOnlyStream, opts: { mimeType: videoOnlyMime.mime }, info: videoOnlyMime },
-    { s: fallbackVideoOnlyStream, opts: {}, info: videoOnlyMime }
+    { s: fallbackVideoOnlyStream, opts: { videoBitsPerSecond }, info: videoOnlyPrimary },
+    { s: fallbackVideoOnlyStream, opts: {}, info: videoOnlyPrimary }
   );
 
   let lastErr: unknown = null;
@@ -193,6 +220,16 @@ function createSafeMediaRecorder(
   throw lastErr instanceof Error
     ? lastErr
     : new Error('Unable to initialize browser video recorder for this format.');
+}
+
+async function tryDecodeVideoAudio(audioCtx: AudioContext | null, file: File): Promise<AudioBuffer | null> {
+  if (!audioCtx || file.size > 300 * 1024 * 1024) return null;
+  try {
+    const raw = await file.arrayBuffer();
+    return await audioCtx.decodeAudioData(raw);
+  } catch {
+    return null;
+  }
 }
 
 function loadVideoMetadata(
@@ -270,10 +307,29 @@ async function transcodeVideosViaCanvas(
     stripAudio?: boolean;
   }
 ): Promise<{ blob: Blob; ext: 'mp4' | 'webm'; width: number; height: number; mime: string }> {
-  const firstMeta = await loadVideoMetadata(files[0]);
-  const cleanupQueue: Array<() => void> = [firstMeta.cleanup];
+  // Create & resume AudioContext synchronously before any await so iOS Safari keeps audio unlocked
+  let audioCtx: AudioContext | null = null;
+  let audioDest: MediaStreamAudioDestinationNode | null = null;
+  if (!config.stripAudio && typeof window !== 'undefined') {
+    try {
+      audioCtx = createAudioContext();
+      audioCtx.resume().catch(() => {});
+      audioDest = audioCtx.createMediaStreamDestination();
+    } catch {
+      audioCtx = null;
+      audioDest = null;
+    }
+  }
+
+  const cleanupQueue: Array<() => void> = [];
 
   try {
+    const [firstMeta, firstAudioBuffer] = await Promise.all([
+      loadVideoMetadata(files[0]),
+      tryDecodeVideoAudio(audioCtx, files[0]),
+    ]);
+    cleanupQueue.push(firstMeta.cleanup);
+
     const natW = firstMeta.video.videoWidth || 640;
     const natH = firstMeta.video.videoHeight || 360;
     const firstDur =
@@ -284,6 +340,12 @@ async function transcodeVideosViaCanvas(
     let drawW: number;
     let drawH: number;
     let effectiveBps = config.videoBitsPerSecond ?? 1_500_000;
+    const audioBps =
+      config.compressQuality !== undefined && config.compressQuality <= 45
+        ? 64_000
+        : config.compressQuality !== undefined && config.compressQuality <= 75
+          ? 96_000
+          : 128_000;
 
     if (config.compressQuality !== undefined) {
       const plan = computeVideoCompressionPlan({
@@ -342,17 +404,26 @@ async function transcodeVideosViaCanvas(
     const tracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks()];
     let hasAudio = false;
 
-    if (!config.stripAudio && files.length === 1) {
-      const capVideo = firstMeta.video as HTMLVideoElement & { captureStream?: () => MediaStream };
-      if (typeof capVideo.captureStream === 'function') {
-        try {
-          const audioTracks = capVideo.captureStream().getAudioTracks();
-          if (audioTracks.length > 0) {
-            tracks.push(audioTracks[0]);
-            hasAudio = true;
+    if (!config.stripAudio) {
+      if (firstAudioBuffer && audioDest) {
+        const destAudioTracks = audioDest.stream.getAudioTracks();
+        if (destAudioTracks.length > 0) {
+          tracks.push(destAudioTracks[0]);
+          hasAudio = true;
+        }
+      } else if (files.length === 1) {
+        // Fallback for >300MB files or codecs decodeAudioData cannot decode directly
+        const capVideo = firstMeta.video as HTMLVideoElement & { captureStream?: () => MediaStream };
+        if (typeof capVideo.captureStream === 'function') {
+          try {
+            const audioTracks = capVideo.captureStream().getAudioTracks();
+            if (audioTracks.length > 0) {
+              tracks.push(audioTracks[0]);
+              hasAudio = true;
+            }
+          } catch {
+            // Fallback to video-only stream when captureStream audio isn't exposed
           }
-        } catch {
-          // Fallback to video-only stream when captureStream audio isn't exposed
         }
       }
     }
@@ -363,7 +434,8 @@ async function transcodeVideosViaCanvas(
       canvasStream,
       config.preferMp4,
       hasAudio,
-      effectiveBps
+      effectiveBps,
+      audioBps
     );
 
     const chunks: Blob[] = [];
@@ -383,7 +455,12 @@ async function transcodeVideosViaCanvas(
 
     recorder.start(200);
 
-    const playSingleSegment = async (video: HTMLVideoElement, startSec: number, endSec: number) => {
+    const playSingleSegment = async (
+      video: HTMLVideoElement,
+      startSec: number,
+      endSec: number,
+      decodedAudio: AudioBuffer | null
+    ) => {
       const rate = Math.min(4, Math.max(0.25, config.speedFactor ?? 1));
       video.playbackRate = rate;
       video.muted = true; // Must stay muted to satisfy autoplay policy inside headless/mobile browsers
@@ -410,6 +487,29 @@ async function transcodeVideosViaCanvas(
       drawFrame();
       await video.play();
 
+      let audioSrc: AudioBufferSourceNode | null = null;
+      if (!config.stripAudio && decodedAudio && audioCtx && audioDest) {
+        try {
+          if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+          }
+          const offset = Math.max(0, Math.min(startSec, Math.max(0, decodedAudio.duration - 0.05)));
+          const durLeft =
+            endSec > startSec && Number.isFinite(endSec)
+              ? Math.max(0.05, endSec - startSec)
+              : Math.max(0.05, decodedAudio.duration - offset);
+          if (offset < decodedAudio.duration) {
+            audioSrc = audioCtx.createBufferSource();
+            audioSrc.buffer = decodedAudio;
+            audioSrc.playbackRate.value = rate;
+            audioSrc.connect(audioDest);
+            audioSrc.start(0, offset, durLeft);
+          }
+        } catch {
+          audioSrc = null;
+        }
+      }
+
       const segDur = Math.max(1, endSec > startSec && Number.isFinite(endSec) ? endSec - startSec : 15);
       const maxWaitMs = Math.max(30_000, Math.min(300_000, Math.ceil((segDur / rate) * 1000) + 15_000));
 
@@ -434,6 +534,14 @@ async function transcodeVideosViaCanvas(
           cancelAnimationFrame(rafId);
           window.clearInterval(backupTimer);
           video.pause();
+          if (audioSrc) {
+            try {
+              audioSrc.stop();
+              audioSrc.disconnect();
+            } catch {
+              // Ignore already-stopped AudioBufferSourceNode
+            }
+          }
           video.removeEventListener('timeupdate', checkDone);
           video.removeEventListener('ended', onEnded);
           window.clearTimeout(safetyTimer);
@@ -447,13 +555,16 @@ async function transcodeVideosViaCanvas(
       const dur = Number.isFinite(firstMeta.video.duration) ? firstMeta.video.duration : 10;
       const start = Math.max(0, config.trimStartSec ?? 0);
       const end = config.trimEndSec && config.trimEndSec > start ? Math.min(dur, config.trimEndSec) : dur;
-      await playSingleSegment(firstMeta.video, start, end);
+      await playSingleSegment(firstMeta.video, start, end, firstAudioBuffer);
 
       for (let i = 1; i < files.length; i++) {
-        const nextMeta = await loadVideoMetadata(files[i]);
+        const [nextMeta, nextAudioBuffer] = await Promise.all([
+          loadVideoMetadata(files[i]),
+          tryDecodeVideoAudio(audioCtx, files[i]),
+        ]);
         cleanupQueue.push(nextMeta.cleanup);
         const nextDur = Number.isFinite(nextMeta.video.duration) ? nextMeta.video.duration : 10;
-        await playSingleSegment(nextMeta.video, 0, nextDur);
+        await playSingleSegment(nextMeta.video, 0, nextDur, nextAudioBuffer);
       }
     } finally {
       if (recorder.state === 'recording') {
@@ -491,6 +602,9 @@ async function transcodeVideosViaCanvas(
       } catch {
         // Ignore cleanup errors
       }
+    }
+    if (audioCtx) {
+      audioCtx.close().catch(() => {});
     }
   }
 }

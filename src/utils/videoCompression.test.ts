@@ -35,6 +35,16 @@ test('getVideoMimeCandidates separates audio+video and video-only codec lists', 
   assert.equal(mp4NoAudio[0].ext, 'mp4');
   assert.ok(!mp4NoAudio.some((c) => c.mime.includes('opus') || c.mime.includes('mp4a')));
 
+  const mp4WithAudio = getVideoMimeCandidates(true, true);
+  assert.ok(mp4WithAudio.some((c) => c.mime === 'video/mp4;codecs=avc1,mp4a.40.2'));
+  assert.ok(mp4WithAudio.some((c) => c.mime === 'video/mp4;codecs=avc1,opus'));
+  // Every codecs= entry in audio-enabled list must include an audio codec
+  for (const c of mp4WithAudio) {
+    if (c.mime.includes('codecs=')) {
+      assert.ok(c.mime.includes('mp4a') || c.mime.includes('opus'), `Expected audio codec in ${c.mime}`);
+    }
+  }
+
   const webmWithAudio = getVideoMimeCandidates(false, true);
   assert.equal(webmWithAudio[0].mime, 'video/webm;codecs=vp9,opus');
 });

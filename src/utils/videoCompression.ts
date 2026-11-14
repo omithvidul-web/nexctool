@@ -66,7 +66,9 @@ export function getVideoMimeCandidates(preferMp4: boolean, hasAudio: boolean): V
     return hasAudio
       ? [
           { mime: 'video/mp4;codecs=avc1,mp4a.40.2', ext: 'mp4' },
-          { mime: 'video/mp4;codecs=avc1', ext: 'mp4' },
+          { mime: 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', ext: 'mp4' },
+          { mime: 'video/mp4;codecs=avc1,opus', ext: 'mp4' },
+          { mime: 'video/mp4;codecs=vp9,opus', ext: 'mp4' },
           { mime: 'video/mp4', ext: 'mp4' },
           { mime: 'video/webm;codecs=vp9,opus', ext: 'webm' },
           { mime: 'video/webm;codecs=vp8,opus', ext: 'webm' },
@@ -87,6 +89,7 @@ export function getVideoMimeCandidates(preferMp4: boolean, hasAudio: boolean): V
         { mime: 'video/webm;codecs=vp8,opus', ext: 'webm' },
         { mime: 'video/webm', ext: 'webm' },
         { mime: 'video/mp4;codecs=avc1,mp4a.40.2', ext: 'mp4' },
+        { mime: 'video/mp4;codecs=avc1,opus', ext: 'mp4' },
         { mime: 'video/mp4', ext: 'mp4' },
       ]
     : [
