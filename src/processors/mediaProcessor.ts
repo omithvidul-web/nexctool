@@ -3,6 +3,7 @@ import { calculateSavingsPercent, formatBytes, replaceExtension } from '../utils
 import { encodeAnimatedGif } from '../utils/gifEncoder';
 import { applyId3v2Metadata, encodeWavBufferWithMeta } from '../utils/id3Helper';
 import { computeVideoCompressionPlan, getVideoMimeCandidates } from '../utils/videoCompression';
+import { attachSilentAudioKeepAlive, unlockSharedAudioContext } from '../utils/audioUnlock';
 
 function toBinaryBlob(bytes: Uint8Array, mimeType: string): Blob {
   const copy = new Uint8Array(bytes.byteLength);
@@ -307,17 +308,17 @@ async function transcodeVideosViaCanvas(
     stripAudio?: boolean;
   }
 ): Promise<{ blob: Blob; ext: 'mp4' | 'webm'; width: number; height: number; mime: string }> {
-  // Create & resume AudioContext synchronously before any await so iOS Safari keeps audio unlocked
-  let audioCtx: AudioContext | null = null;
+  const audioCtx = !config.stripAudio ? unlockSharedAudioContext() : null;
   let audioDest: MediaStreamAudioDestinationNode | null = null;
-  if (!config.stripAudio && typeof window !== 'undefined') {
+  let keepAlive: { zeroGainToSpeakers: GainNode; cleanup: () => void } | null = null;
+  if (audioCtx) {
     try {
-      audioCtx = createAudioContext();
       audioCtx.resume().catch(() => {});
       audioDest = audioCtx.createMediaStreamDestination();
+      keepAlive = attachSilentAudioKeepAlive(audioCtx, audioDest);
     } catch {
-      audioCtx = null;
       audioDest = null;
+      keepAlive = null;
     }
   }
 
@@ -453,7 +454,7 @@ async function transcodeVideosViaCanvas(
       recorder.onstop = () => resolve(new Blob(chunks, { type: cleanMime }));
     });
 
-    recorder.start(200);
+    let recorderStarted = false;
 
     const playSingleSegment = async (
       video: HTMLVideoElement,
@@ -484,15 +485,25 @@ async function transcodeVideosViaCanvas(
         if (running) paintVideoFrame(video);
       }, 33);
 
+      if (!config.stripAudio && decodedAudio && audioCtx && audioCtx.state !== 'running') {
+        try {
+          await audioCtx.resume();
+        } catch {
+          // Ignore resume errors when context cannot unlock
+        }
+      }
+
       drawFrame();
       await video.play();
+
+      if (!recorderStarted) {
+        recorder.start(200);
+        recorderStarted = true;
+      }
 
       let audioSrc: AudioBufferSourceNode | null = null;
       if (!config.stripAudio && decodedAudio && audioCtx && audioDest) {
         try {
-          if (audioCtx.state === 'suspended') {
-            await audioCtx.resume();
-          }
           const offset = Math.max(0, Math.min(startSec, Math.max(0, decodedAudio.duration - 0.05)));
           const durLeft =
             endSec > startSec && Number.isFinite(endSec)
@@ -503,6 +514,10 @@ async function transcodeVideosViaCanvas(
             audioSrc.buffer = decodedAudio;
             audioSrc.playbackRate.value = rate;
             audioSrc.connect(audioDest);
+            if (keepAlive) {
+              // Routing into a 0-gain sink on audioCtx.destination ensures WebKit pulls samples
+              audioSrc.connect(keepAlive.zeroGainToSpeakers);
+            }
             audioSrc.start(0, offset, durLeft);
           }
         } catch {
@@ -579,7 +594,9 @@ async function transcodeVideosViaCanvas(
       }
     }
 
-    const outBlob = await stoppedPromise;
+    const outBlob = recorderStarted
+      ? await stoppedPromise
+      : new Blob([], { type: cleanMime });
     if (recorderError && outBlob.size === 0) {
       throw new Error(recorderError);
     }
@@ -596,15 +613,15 @@ async function transcodeVideosViaCanvas(
       mime: cleanMime,
     };
   } finally {
+    if (keepAlive) {
+      keepAlive.cleanup();
+    }
     for (const fn of cleanupQueue) {
       try {
         fn();
       } catch {
         // Ignore cleanup errors
       }
-    }
-    if (audioCtx) {
-      audioCtx.close().catch(() => {});
     }
   }
 }

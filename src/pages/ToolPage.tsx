@@ -26,6 +26,7 @@ import { FileUploader } from '../components/FileUploader';
 import { SeoHead } from '../components/SeoHead';
 import { runToolProcessor } from '../processors/runTool';
 import { SAMPLE_INPUTS } from '../processors/textProcessor';
+import { unlockSharedAudioContext } from '../utils/audioUnlock';
 import type { ProcessOptions, ProcessResult } from '../processors/types';
 
 export function ToolPage() {
@@ -180,6 +181,9 @@ export function ToolPage() {
 
   const handleProcess = async () => {
     if (isComingSoon) return;
+    if (tool.lazyGroup === 'media') {
+      unlockSharedAudioContext();
+    }
     setError(null);
     setResult(null);
     setCopied(false);
