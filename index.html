@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/png" href="/assets/aistudio/IMG_0514_81b1a88b.png" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <title>NexcTool - 200 Free Online File Tools | 100% Private</title>
     <meta
       name="description"
@@ -37,17 +42,39 @@
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "WebApplication",
-        "name": "NexcTool",
-        "url": "https://nexctool.com",
-        "applicationCategory": "UtilitiesApplication",
-        "operatingSystem": "All",
-        "description": "200 free, 100% private online file tools that run directly inside your browser. Your file never leaves your device.",
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "USD"
-        }
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "name": "NexcTool",
+            "alternateName": "NexcTool.com",
+            "url": "https://nexctool.com/"
+          },
+          {
+            "@type": "Organization",
+            "name": "NexcTool",
+            "url": "https://nexctool.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://nexctool.com/logo.png",
+              "width": 512,
+              "height": 512
+            }
+          },
+          {
+            "@type": "WebApplication",
+            "name": "NexcTool",
+            "url": "https://nexctool.com/",
+            "image": "https://nexctool.com/logo.png",
+            "applicationCategory": "UtilitiesApplication",
+            "operatingSystem": "All",
+            "description": "200 free, 100% private online file tools that run directly inside your browser. Your file never leaves your device.",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            }
+          }
+        ]
       }
     </script>
     <script>
