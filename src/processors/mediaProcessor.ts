@@ -4,6 +4,7 @@ import { encodeAnimatedGif } from '../utils/gifEncoder';
 import { applyId3v2Metadata, encodeWavBufferWithMeta } from '../utils/id3Helper';
 import { computeVideoCompressionPlan, getVideoMimeCandidates } from '../utils/videoCompression';
 import { attachSilentAudioKeepAlive, unlockSharedAudioContext } from '../utils/audioUnlock';
+import { extractAdtsAudioFromMp4OrMov, maskNonAudioTracksInMp4Mov } from '../utils/mp4AudioExtractor';
 
 function toBinaryBlob(bytes: Uint8Array, mimeType: string): Blob {
   const copy = new Uint8Array(bytes.byteLength);
@@ -223,11 +224,39 @@ function createSafeMediaRecorder(
     : new Error('Unable to initialize browser video recorder for this format.');
 }
 
+async function decodeAudioBufferResilient(audioCtx: AudioContext, file: File): Promise<AudioBuffer> {
+  const raw = await file.arrayBuffer();
+
+  // 1. Demux raw AAC frames into a pure ADTS .aac stream (strips HEVC hvc1/hev1/dvh1 video & QuickTime atoms)
+  try {
+    const adts = extractAdtsAudioFromMp4OrMov(raw);
+    if (adts && adts.byteLength > 0) {
+      const buf = await audioCtx.decodeAudioData(adts);
+      if (buf && buf.length > 0) return buf;
+    }
+  } catch {
+    // Fall through to masked container / raw container decode
+  }
+
+  // 2. Mask non-audio tracks (HEVC video, timed metadata, Spatial Audio apac) to 'free' in-place
+  try {
+    const masked = maskNonAudioTracksInMp4Mov(raw);
+    if (masked && masked.byteLength > 0) {
+      const buf = await audioCtx.decodeAudioData(masked);
+      if (buf && buf.length > 0) return buf;
+    }
+  } catch {
+    // Fall through to direct container decode
+  }
+
+  // 3. Direct container decode (WebM/Opus, WAV, MP3, OGG, FLAC, standard MP4)
+  return await audioCtx.decodeAudioData(raw.slice(0));
+}
+
 async function tryDecodeVideoAudio(audioCtx: AudioContext | null, file: File): Promise<AudioBuffer | null> {
   if (!audioCtx || file.size > 300 * 1024 * 1024) return null;
   try {
-    const raw = await file.arrayBuffer();
-    return await audioCtx.decodeAudioData(raw);
+    return await decodeAudioBufferResilient(audioCtx, file);
   } catch {
     return null;
   }
@@ -406,14 +435,13 @@ async function transcodeVideosViaCanvas(
     let hasAudio = false;
 
     if (!config.stripAudio) {
-      if (firstAudioBuffer && audioDest) {
+      if (audioDest) {
         const destAudioTracks = audioDest.stream.getAudioTracks();
         if (destAudioTracks.length > 0) {
           tracks.push(destAudioTracks[0]);
           hasAudio = true;
         }
       } else if (files.length === 1) {
-        // Fallback for >300MB files or codecs decodeAudioData cannot decode directly
         const capVideo = firstMeta.video as HTMLVideoElement & { captureStream?: () => MediaStream };
         if (typeof capVideo.captureStream === 'function') {
           try {
@@ -464,13 +492,28 @@ async function transcodeVideosViaCanvas(
     ) => {
       const rate = Math.min(4, Math.max(0.25, config.speedFactor ?? 1));
       video.playbackRate = rate;
-      video.muted = true; // Must stay muted to satisfy autoplay policy inside headless/mobile browsers
+      video.muted = true; // Start muted so autoplay policy never blocks video.play()
       if (startSec > 0 && Number.isFinite(video.duration)) {
         video.currentTime = Math.min(startSec, Math.max(0, video.duration - 0.1));
         await new Promise<void>((res) => {
           video.onseeked = () => res();
           setTimeout(res, 250);
         });
+      }
+
+      // If pre-decoding AudioBuffer failed (e.g. non-AAC codec in HEVC container),
+      // route live <video> element audio into WebAudio (0-gain to speakers so device stays silent)
+      let liveElemSource: MediaElementAudioSourceNode | null = null;
+      if (!config.stripAudio && !decodedAudio && audioCtx && audioDest) {
+        try {
+          liveElemSource = audioCtx.createMediaElementSource(video);
+          liveElemSource.connect(audioDest);
+          if (keepAlive) {
+            liveElemSource.connect(keepAlive.zeroGainToSpeakers);
+          }
+        } catch {
+          liveElemSource = null;
+        }
       }
 
       let running = true;
@@ -485,7 +528,7 @@ async function transcodeVideosViaCanvas(
         if (running) paintVideoFrame(video);
       }, 33);
 
-      if (!config.stripAudio && decodedAudio && audioCtx && audioCtx.state !== 'running') {
+      if (!config.stripAudio && audioCtx && audioCtx.state !== 'running') {
         try {
           await audioCtx.resume();
         } catch {
@@ -495,6 +538,13 @@ async function transcodeVideosViaCanvas(
 
       drawFrame();
       await video.play();
+
+      if (liveElemSource) {
+        // Safe to unmute now: createMediaElementSource hijacks audio away from hardware speakers
+        // into zeroGainToSpeakers (gain=0) while feeding full volume to audioDest.stream
+        video.muted = false;
+        video.volume = 1.0;
+      }
 
       if (!recorderStarted) {
         recorder.start(200);
@@ -548,6 +598,7 @@ async function transcodeVideosViaCanvas(
           running = false;
           cancelAnimationFrame(rafId);
           window.clearInterval(backupTimer);
+          video.muted = true;
           video.pause();
           if (audioSrc) {
             try {
@@ -555,6 +606,13 @@ async function transcodeVideosViaCanvas(
               audioSrc.disconnect();
             } catch {
               // Ignore already-stopped AudioBufferSourceNode
+            }
+          }
+          if (liveElemSource) {
+            try {
+              liveElemSource.disconnect();
+            } catch {
+              // Ignore disconnect errors
             }
           }
           video.removeEventListener('timeupdate', checkDone);
@@ -688,13 +746,13 @@ export async function processMediaTool(
         let totalOriginal = 0;
         for (const f of files) {
           totalOriginal += f.size;
-          decodedList.push(await ctx.decodeAudioData(await f.arrayBuffer()));
+          decodedList.push(await decodeAudioBufferResilient(ctx, f));
         }
         const targetRate = decodedList[0].sampleRate;
         const targetChannels = Math.min(2, Math.max(...decodedList.map((b) => b.numberOfChannels)));
         const normalized: AudioBuffer[] = [];
         let totalFrames = 0;
-        for (const b of decodedList) {
+        for (const b of normalized.length === 0 ? decodedList : []) {
           const resampled = await resampleAudioBuffer(b, targetRate, targetChannels);
           normalized.push(resampled);
           totalFrames += resampled.length;
@@ -723,7 +781,7 @@ export async function processMediaTool(
         };
       }
 
-      const decoded = await ctx.decodeAudioData(await file.arrayBuffer());
+      const decoded = await decodeAudioBufferResilient(ctx, file);
 
       if (slug === 'mp3-to-wav' || slug === 'video-to-wav') {
         const wavBytes = encodeWavFromAudioBuffer(decoded);
