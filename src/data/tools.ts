@@ -62,6 +62,13 @@ export type DevPreviewKind =
   | 'regex'
   | 'diff';
 
+export type InteractiveToolKind =
+  | 'qr-code'
+  | 'favicon-pack'
+  | 'image-blur'
+  | 'image-collage'
+  | 'invoice-pdf';
+
 export interface ToolItem {
   id: number;
   name: string;
@@ -78,6 +85,7 @@ export interface ToolItem {
   optionType?: ToolOptionConfig['type'];
   lazyGroup?: 'image' | 'pdf' | 'spreadsheet' | 'office' | 'media' | 'text' | 'utility';
   previewKind?: DevPreviewKind;
+  interactiveKind?: InteractiveToolKind;
 }
 
 export const CATEGORIES: CategoryMeta[] = [
@@ -87,7 +95,7 @@ export const CATEGORIES: CategoryMeta[] = [
     shortName: 'Images',
     description: 'Convert, compress, resize, rotate, and optimize images locally in your browser.',
     icon: 'image',
-    expectedCount: 30,
+    expectedCount: 33,
   },
   {
     slug: 'pdf-tools',
@@ -95,7 +103,7 @@ export const CATEGORIES: CategoryMeta[] = [
     shortName: 'PDF',
     description: 'Merge, split, rotate, extract, and convert PDF documents without uploading.',
     icon: 'file-text',
-    expectedCount: 30,
+    expectedCount: 31,
   },
   {
     slug: 'document-tools',
@@ -157,9 +165,9 @@ export const CATEGORIES: CategoryMeta[] = [
     slug: 'file-utilities',
     name: 'File Utilities',
     shortName: 'Utilities',
-    description: 'Generate cryptographic hashes, inspect metadata, split, merge, and verify files.',
+    description: 'Generate cryptographic hashes, QR codes, inspect metadata, split, merge, and verify files.',
     icon: 'wrench',
-    expectedCount: 10,
+    expectedCount: 11,
   },
 ];
 
@@ -177,6 +185,7 @@ interface RawToolSeed {
   optionType?: ToolOptionConfig['type'];
   lazyGroup?: ToolItem['lazyGroup'];
   previewKind?: DevPreviewKind;
+  interactiveKind?: InteractiveToolKind;
 }
 
 export function slugifyToolName(name: string): string {
@@ -534,6 +543,69 @@ const RAW_TOOLS: RawToolSeed[] = [
   { id: 198, name: 'Duplicate File Checker', category: 'file-utilities', accept: '*/*', multiple: true, mode: 'browser', actionLabel: 'Check Duplicates', lazyGroup: 'utility', description: 'Compare multiple files by SHA-256 content hash to spot exact duplicates locally.' },
   { id: 199, name: 'File Splitter', category: 'file-utilities', accept: '*/*', mode: 'browser', actionLabel: 'Split File', optionType: 'split-size', lazyGroup: 'utility' },
   { id: 200, name: 'File Merger', category: 'file-utilities', accept: '*/*', multiple: true, mode: 'browser', actionLabel: 'Merge Files', lazyGroup: 'utility' },
+
+  // 11. NEW INTERACTIVE EVERYDAY UTILITY TOOLS (210-214)
+  {
+    id: 210,
+    name: 'QR Code Generator & Scanner',
+    slug: 'qr-code-generator-scanner',
+    category: 'file-utilities',
+    accept: 'image/*',
+    mode: 'text-or-file',
+    actionLabel: 'Generate / Scan QR',
+    lazyGroup: 'utility',
+    interactiveKind: 'qr-code',
+    description: 'Create custom QR codes for URLs, Wi-Fi, Email, or Phone with logo & PNG/SVG export, or scan QR codes from images and camera locally.',
+  },
+  {
+    id: 211,
+    name: 'Favicon & App Icon Pack Generator',
+    slug: 'favicon-generator',
+    category: 'image-tools',
+    accept: 'image/*',
+    mode: 'browser',
+    actionLabel: 'Generate Favicon Pack',
+    lazyGroup: 'image',
+    interactiveKind: 'favicon-pack',
+    description: 'Generate multi-resolution favicon.ico, Apple Touch (180px), Android/PWA PNGs, site.webmanifest, and HTML tags in one ZIP locally.',
+  },
+  {
+    id: 212,
+    name: 'Image Blur & Privacy Redactor',
+    slug: 'image-blur-redactor',
+    category: 'image-tools',
+    accept: 'image/*',
+    mode: 'browser',
+    actionLabel: 'Export Redacted Image',
+    lazyGroup: 'image',
+    interactiveKind: 'image-blur',
+    description: 'Blur, pixelate, or blackout sensitive faces, phone numbers, IDs, and screenshots directly on canvas inside your browser.',
+  },
+  {
+    id: 213,
+    name: 'Image Collage & Joiner',
+    slug: 'image-collage-joiner',
+    category: 'image-tools',
+    accept: 'image/*',
+    multiple: true,
+    mode: 'browser',
+    actionLabel: 'Create Collage',
+    lazyGroup: 'image',
+    interactiveKind: 'image-collage',
+    description: 'Combine multiple photos side-by-side, vertically, in grids, or Before/After layouts with custom spacing and instant download.',
+  },
+  {
+    id: 214,
+    name: 'Invoice & Receipt PDF Generator',
+    slug: 'invoice-pdf-generator',
+    category: 'pdf-tools',
+    accept: 'image/*',
+    mode: 'text-or-file',
+    actionLabel: 'Download Invoice PDF',
+    lazyGroup: 'pdf',
+    interactiveKind: 'invoice-pdf',
+    description: 'Create clean, professional invoices, receipts, and quotes with line items, taxes, discounts, and logo—exported as PDF locally.',
+  },
 ];
 
 export const TOOLS: ToolItem[] = RAW_TOOLS.map((seed) => {
@@ -563,6 +635,7 @@ export const TOOLS: ToolItem[] = RAW_TOOLS.map((seed) => {
     optionType: seed.optionType,
     lazyGroup: seed.lazyGroup,
     previewKind: seed.previewKind,
+    interactiveKind: seed.interactiveKind,
   };
 });
 

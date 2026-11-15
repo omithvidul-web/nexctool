@@ -6,6 +6,11 @@ const DeveloperPreviewTool = lazy(() =>
     default: m.DeveloperPreviewTool,
   }))
 );
+const InteractiveToolWorkspace = lazy(() =>
+  import('../components/InteractiveToolWorkspace').then((m) => ({
+    default: m.InteractiveToolWorkspace,
+  }))
+);
 import {
   AlertCircle,
   Archive,
@@ -332,7 +337,17 @@ export function ToolPage() {
             </span>
           </div>
 
-          {tool.previewKind ? (
+          {tool.interactiveKind ? (
+            <Suspense
+              fallback={
+                <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                  Loading interactive workspace...
+                </div>
+              }
+            >
+              <InteractiveToolWorkspace tool={tool} />
+            </Suspense>
+          ) : tool.previewKind ? (
             <Suspense
               fallback={
                 <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-400">

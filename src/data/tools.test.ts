@@ -10,9 +10,9 @@ import {
   searchTools,
 } from './tools';
 
-test('catalog has exact 209 tools and 10 categories', () => {
+test('catalog has exact 214 tools and 10 categories', () => {
   assert.equal(CATEGORIES.length, 10);
-  assert.equal(TOOLS.length, 209);
+  assert.equal(TOOLS.length, 214);
   assert.equal(POPULAR_TOOLS.length, 12);
 });
 
@@ -26,8 +26,8 @@ test('every category matches its expected tool count', () => {
 test('all tool slugs and ids are unique', () => {
   const slugs = new Set(TOOLS.map((t) => t.slug));
   const ids = new Set(TOOLS.map((t) => t.id));
-  assert.equal(slugs.size, 209);
-  assert.equal(ids.size, 209);
+  assert.equal(slugs.size, 214);
+  assert.equal(ids.size, 214);
 });
 
 test('the 5 required core tools exist and are browser-enabled', () => {
@@ -128,7 +128,27 @@ test('all 12 popular tools and newly activated tools are browser-enabled', () =>
   }
 
   const activeTotal = TOOLS.filter((t) => t.mode !== 'coming-soon').length;
-  assert.ok(activeTotal >= 190, `Expected at least 190 active tools, got ${activeTotal}`);
+  assert.ok(activeTotal >= 195, `Expected at least 195 active tools, got ${activeTotal}`);
 });
+
+test('5 new everyday interactive tools exist with distinct slugs and interactiveKind', () => {
+  const newSlugs = [
+    'qr-code-generator-scanner',
+    'favicon-generator',
+    'image-blur-redactor',
+    'image-collage-joiner',
+    'invoice-pdf-generator',
+  ];
+  const kinds = new Set<string>();
+  for (const slug of newSlugs) {
+    const tool = getToolBySlug(slug);
+    assert.ok(tool, `Missing new tool: ${slug}`);
+    assert.notEqual(tool.mode, 'coming-soon', `New tool ${slug} should be active`);
+    assert.ok(tool.interactiveKind, `Missing interactiveKind on ${slug}`);
+    kinds.add(tool.interactiveKind);
+  }
+  assert.equal(kinds.size, 5);
+});
+
 
 
