@@ -752,7 +752,7 @@ export async function processMediaTool(
         const targetChannels = Math.min(2, Math.max(...decodedList.map((b) => b.numberOfChannels)));
         const normalized: AudioBuffer[] = [];
         let totalFrames = 0;
-        for (const b of normalized.length === 0 ? decodedList : []) {
+        for (const b of decodedList) {
           const resampled = await resampleAudioBuffer(b, targetRate, targetChannels);
           normalized.push(resampled);
           totalFrames += resampled.length;
