@@ -269,7 +269,12 @@ export function ToolPage() {
 
   return (
     <>
-      <SeoHead title={seo.titleTag} description={seo.metaDescription} faqs={seo.faqs} />
+      <SeoHead
+        title={seo.titleTag}
+        description={seo.metaDescription}
+        faqs={seo.faqs}
+        appName={tool.name}
+      />
 
       {/* Top Header + Breadcrumb */}
       <section className="bg-white/70 dark:bg-[#0D1322] border-b border-slate-200/80 dark:border-slate-800/80">

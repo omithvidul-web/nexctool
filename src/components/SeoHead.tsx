@@ -10,6 +10,7 @@ interface SeoHeadProps {
   description: string;
   imagePath?: string;
   faqs?: FaqSchemaItem[];
+  appName?: string;
 }
 
 function upsertMeta(selector: string, attrName: 'name' | 'property', attrValue: string, content: string) {
@@ -27,6 +28,7 @@ export function SeoHead({
   description,
   imagePath = '/assets/og-banner.jpg',
   faqs,
+  appName,
 }: SeoHeadProps) {
   const faqKey = faqs ? JSON.stringify(faqs) : '';
 
@@ -86,15 +88,49 @@ export function SeoHead({
       existingFaqScript.remove();
     }
 
+    const existingWebAppScript = document.querySelector<HTMLScriptElement>(
+      'script[type="application/ld+json"][data-seo-schema="webapp"]'
+    );
+
+    if (appName) {
+      const appPayload = {
+        '@context': 'https://schema.org',
+        '@type': 'WebApplication',
+        name: appName,
+        url: canonicalHref,
+        applicationCategory: 'UtilitiesApplication',
+        operatingSystem: 'All',
+        browserRequirements: 'Requires JavaScript and HTML5 Canvas',
+        description,
+        offers: {
+          '@type': 'Offer',
+          price: '0',
+          priceCurrency: 'USD',
+        },
+      };
+      const scriptEl = existingWebAppScript ?? document.createElement('script');
+      scriptEl.type = 'application/ld+json';
+      scriptEl.setAttribute('data-seo-schema', 'webapp');
+      scriptEl.textContent = JSON.stringify(appPayload);
+      if (!existingWebAppScript) {
+        document.head.appendChild(scriptEl);
+      }
+    } else if (existingWebAppScript) {
+      existingWebAppScript.remove();
+    }
+
     return () => {
       const staleFaq = document.querySelector<HTMLScriptElement>(
         'script[type="application/ld+json"][data-seo-schema="faq"]'
       );
-      if (staleFaq) {
-        staleFaq.remove();
-      }
+      if (staleFaq) staleFaq.remove();
+
+      const staleApp = document.querySelector<HTMLScriptElement>(
+        'script[type="application/ld+json"][data-seo-schema="webapp"]'
+      );
+      if (staleApp) staleApp.remove();
     };
-  }, [title, description, imagePath, faqKey, faqs]);
+  }, [title, description, imagePath, faqKey, faqs, appName]);
 
   return null;
 }
