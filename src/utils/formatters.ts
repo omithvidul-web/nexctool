@@ -170,6 +170,90 @@ const INTERACTIVE_STEPS: Record<string, { title: string; description: string }[]
       description: 'Export your finished custom ringtone in seconds directly inside your browser.',
     },
   ],
+  'file-crypto': [
+    {
+      title: 'Choose Encrypt or Decrypt (.nexenc)',
+      description: 'Select Encrypt File to protect any document or media file, or Decrypt to unlock an existing .nexenc archive.',
+    },
+    {
+      title: 'Select your file & enter a passphrase',
+      description: 'Your browser derives a 256-bit AES-GCM key locally using 310,000 PBKDF2-SHA256 iterations with zero uploads.',
+    },
+    {
+      title: 'Download encrypted or restored file',
+      description: 'Save the authenticated .nexenc container or restore the exact original file and filename directly to your device.',
+    },
+  ],
+  'jwt-decoder': [
+    {
+      title: 'Paste your encoded JWT token',
+      description: 'Enter any three-part Bearer or raw JWT string—decoding happens immediately in browser memory.',
+    },
+    {
+      title: 'Inspect Header, Payload & expiration status',
+      description: 'Read formatted JSON claims, signing algorithm, iat/exp timestamps, and active vs. expired status.',
+    },
+    {
+      title: 'Optionally verify HMAC signature locally',
+      description: 'Paste an HS256, HS384, or HS512 secret to validate the cryptographic signature via Web Crypto API.',
+    },
+  ],
+  'password-uuid': [
+    {
+      title: 'Customize password length & character sets',
+      description: 'Pick length (8–64 chars), uppercase, lowercase, digits, symbols, or exclude ambiguous characters with live entropy feedback.',
+    },
+    {
+      title: 'Generate bulk UUID v4 identifiers',
+      description: 'Choose between 1 and 500 UUIDs with optional UPPERCASE formatting or hyphen removal.',
+    },
+    {
+      title: 'Copy or download as .txt / .json',
+      description: 'Copy your generated password or UUID batch to clipboard, or export UUID lists straight to a file.',
+    },
+  ],
+  'color-palette': [
+    {
+      title: 'Upload an image or test a sample gradient',
+      description: 'Extract up to 6 dominant HEX, RGB, and HSL color swatches locally from any photo, UI screenshot, or logo.',
+    },
+    {
+      title: 'Send colors to Foreground or Background',
+      description: 'Click Use Text or Use BG on any extracted swatch, or pick custom HEX shades in the WCAG Contrast Checker.',
+    },
+    {
+      title: 'Check WCAG 2.1 AA / AAA contrast ratios',
+      description: 'Verify live contrast ratio, typography legibility preview, and pass/fail status for Normal and Large text.',
+    },
+  ],
+  'data-chart': [
+    {
+      title: 'Paste CSV/JSON data or upload a file',
+      description: 'Enter comma-separated rows or a JSON array of objects, or upload a .csv / .json file from your device.',
+    },
+    {
+      title: 'Choose Bar, Line, or Pie chart & title',
+      description: 'Switch between chart types and edit your chart title with an instant live SVG vector preview.',
+    },
+    {
+      title: 'Download crisp SVG or 2x PNG',
+      description: 'Export a scalable .svg chart or high-resolution .png image directly for reports, slides, and docs.',
+    },
+  ],
+  'timestamp-cron': [
+    {
+      title: 'Convert Unix timestamps in seconds or ms',
+      description: 'Paste any Unix epoch number (auto-detects seconds vs. milliseconds) or convert a local date back to epoch time.',
+    },
+    {
+      title: 'Enter or pick a 5-field Cron expression',
+      description: 'Test standard cron schedules with quick presets and inspect minute, hour, day, month, and weekday fields.',
+    },
+    {
+      title: 'Read plain-English summary & next 5 UTC runs',
+      description: 'Copy converted ISO/UTC strings and verify the upcoming 5 execution timestamps before deploying your job.',
+    },
+  ],
 };
 
 export function buildToolSeoContent(tool: ToolItem): ToolSeoContent {

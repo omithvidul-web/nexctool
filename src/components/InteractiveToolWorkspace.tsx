@@ -29,6 +29,24 @@ const SocialVideoResizerTool = lazy(() =>
 const RingtoneMakerTool = lazy(() =>
   import('./tools/RingtoneMakerTool').then((m) => ({ default: m.RingtoneMakerTool }))
 );
+const FileCryptoTool = lazy(() =>
+  import('./tools/FileCryptoTool').then((m) => ({ default: m.FileCryptoTool }))
+);
+const JwtDecoderTool = lazy(() =>
+  import('./tools/JwtDecoderTool').then((m) => ({ default: m.JwtDecoderTool }))
+);
+const PasswordUuidTool = lazy(() =>
+  import('./tools/PasswordUuidTool').then((m) => ({ default: m.PasswordUuidTool }))
+);
+const ColorPaletteContrastTool = lazy(() =>
+  import('./tools/ColorPaletteContrastTool').then((m) => ({ default: m.ColorPaletteContrastTool }))
+);
+const DataChartTool = lazy(() =>
+  import('./tools/DataChartTool').then((m) => ({ default: m.DataChartTool }))
+);
+const TimestampCronTool = lazy(() =>
+  import('./tools/TimestampCronTool').then((m) => ({ default: m.TimestampCronTool }))
+);
 
 interface InteractiveToolWorkspaceProps {
   tool: ToolItem;
@@ -53,6 +71,12 @@ export function InteractiveToolWorkspace({ tool }: InteractiveToolWorkspaceProps
       {tool.interactiveKind === 'subtitle-tool' && <SubtitleTool />}
       {tool.interactiveKind === 'social-video-pad' && <SocialVideoResizerTool />}
       {tool.interactiveKind === 'ringtone-maker' && <RingtoneMakerTool />}
+      {tool.interactiveKind === 'file-crypto' && <FileCryptoTool />}
+      {tool.interactiveKind === 'jwt-decoder' && <JwtDecoderTool />}
+      {tool.interactiveKind === 'password-uuid' && <PasswordUuidTool />}
+      {tool.interactiveKind === 'color-palette' && <ColorPaletteContrastTool />}
+      {tool.interactiveKind === 'data-chart' && <DataChartTool />}
+      {tool.interactiveKind === 'timestamp-cron' && <TimestampCronTool />}
     </Suspense>
   );
 }

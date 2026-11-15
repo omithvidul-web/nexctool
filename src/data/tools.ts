@@ -72,7 +72,13 @@ export type InteractiveToolKind =
   | 'screen-voice-recorder'
   | 'subtitle-tool'
   | 'social-video-pad'
-  | 'ringtone-maker';
+  | 'ringtone-maker'
+  | 'file-crypto'
+  | 'jwt-decoder'
+  | 'password-uuid'
+  | 'color-palette'
+  | 'data-chart'
+  | 'timestamp-cron';
 
 export interface ToolItem {
   id: number;
@@ -100,7 +106,7 @@ export const CATEGORIES: CategoryMeta[] = [
     shortName: 'Images',
     description: 'Convert, compress, resize, rotate, and optimize images locally in your browser.',
     icon: 'image',
-    expectedCount: 34,
+    expectedCount: 35,
   },
   {
     slug: 'pdf-tools',
@@ -124,7 +130,7 @@ export const CATEGORIES: CategoryMeta[] = [
     shortName: 'Spreadsheets',
     description: 'Convert CSV, TSV, JSON, and spreadsheet files cleanly on your own device.',
     icon: 'table',
-    expectedCount: 20,
+    expectedCount: 21,
   },
   {
     slug: 'presentation-tools',
@@ -164,15 +170,15 @@ export const CATEGORIES: CategoryMeta[] = [
     shortName: 'Developer',
     description: 'Preview HTML, CSS, Markdown, run JS & Python, inspect JSON/XML trees, format SQL, test Regex, and compare Text Diff.',
     icon: 'code',
-    expectedCount: 27,
+    expectedCount: 29,
   },
   {
     slug: 'file-utilities',
     name: 'File Utilities',
     shortName: 'Utilities',
-    description: 'Generate cryptographic hashes, QR codes, inspect metadata, split, merge, and verify files.',
+    description: 'Generate cryptographic hashes, encrypt files, generate passwords/UUIDs, QR codes, and inspect files.',
     icon: 'wrench',
-    expectedCount: 11,
+    expectedCount: 13,
   },
 ];
 
@@ -672,6 +678,80 @@ const RAW_TOOLS: RawToolSeed[] = [
     lazyGroup: 'media',
     interactiveKind: 'ringtone-maker',
     description: 'Trim any audio track with waveform preview, add smooth Fade-In and Fade-Out ramps, preview live, and export as MP3 or WAV.',
+  },
+
+  // 13. SECURITY, PRIVACY & DEVELOPER TOOLS (220-225)
+  {
+    id: 220,
+    name: 'File Encryptor & Decryptor (AES-256-GCM)',
+    slug: 'file-encryptor-decryptor',
+    category: 'file-utilities',
+    accept: '*/*',
+    mode: 'browser',
+    actionLabel: 'Encrypt / Decrypt File',
+    lazyGroup: 'utility',
+    interactiveKind: 'file-crypto',
+    description: 'Encrypt any file locally using Web Crypto AES-256-GCM with PBKDF2-SHA256 key derivation and restore the exact original file with your password.',
+  },
+  {
+    id: 221,
+    name: 'JWT Decoder & Inspector',
+    slug: 'jwt-decoder-inspector',
+    category: 'text-developer-tools',
+    accept: '.txt,.jwt',
+    mode: 'text-or-file',
+    actionLabel: 'Inspect JWT',
+    lazyGroup: 'text',
+    interactiveKind: 'jwt-decoder',
+    description: 'Decode JSON Web Token headers, payloads, and expiration claims offline and verify HS256/HS384/HS512 HMAC signatures locally.',
+  },
+  {
+    id: 222,
+    name: 'Strong Password & Bulk UUID Generator',
+    slug: 'password-uuid-generator',
+    category: 'file-utilities',
+    accept: '*/*',
+    mode: 'text-or-file',
+    actionLabel: 'Generate Passwords & UUIDs',
+    lazyGroup: 'utility',
+    interactiveKind: 'password-uuid',
+    description: 'Generate cryptographically random passwords with entropy scoring alongside bulk UUID v4 lists exported as .txt or .json locally.',
+  },
+  {
+    id: 223,
+    name: 'Color Palette Extractor & WCAG Contrast Checker',
+    slug: 'color-palette-contrast',
+    category: 'image-tools',
+    accept: 'image/*',
+    mode: 'text-or-file',
+    actionLabel: 'Check Palette & Contrast',
+    lazyGroup: 'image',
+    interactiveKind: 'color-palette',
+    description: 'Extract dominant HEX/RGB/HSL color palettes from any image and test foreground/background combinations for WCAG 2.1 AA and AAA compliance.',
+  },
+  {
+    id: 224,
+    name: 'CSV / JSON to Chart (PNG/SVG)',
+    slug: 'csv-json-chart-generator',
+    category: 'spreadsheet-tools',
+    accept: '.csv,.json',
+    mode: 'text-or-file',
+    actionLabel: 'Build & Export Chart',
+    lazyGroup: 'spreadsheet',
+    interactiveKind: 'data-chart',
+    description: 'Turn CSV tables or JSON arrays into crisp Bar, Line, or Pie charts in your browser and download publication-ready SVG or 2x PNG images.',
+  },
+  {
+    id: 225,
+    name: 'Unix Timestamp Converter & Cron Explainer',
+    slug: 'timestamp-cron-converter',
+    category: 'text-developer-tools',
+    accept: '.txt',
+    mode: 'text-or-file',
+    actionLabel: 'Convert Timestamp & Cron',
+    lazyGroup: 'text',
+    interactiveKind: 'timestamp-cron',
+    description: 'Convert Unix seconds/milliseconds to UTC and local dates, explain 5-field cron expressions in plain English, and preview the next 5 scheduled runs.',
   },
 ];
 
