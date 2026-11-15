@@ -214,6 +214,55 @@ export async function processUtilityTool(
     };
   }
 
+  if (slug === '7z-extractor' || slug === 'rar-extractor') {
+    const archiveFile = files[0];
+    const { extractArchiveWithLibarchive } = await import('../utils/libarchiveHelper');
+    const entries = await extractArchiveWithLibarchive(archiveFile, options.archivePassword);
+    const extractedTotal = entries.reduce((acc, e) => acc + e.size, 0);
+    const listing = entries.map((e, i) => `${i + 1}. ${e.path} (${formatBytes(e.size)})`).join('\n');
+    return {
+      files: entries.map((e) => ({
+        blob: e.file,
+        filename: e.filename.split('/').filter(Boolean).pop() || e.filename,
+        mimeType: 'application/octet-stream',
+        size: e.size,
+      })),
+      textOutput: listing,
+      outputFilename: entries[0]?.filename,
+      summaryLines: [
+        `Extracted ${entries.length} file(s) from "${archiveFile.name}" via WASM libarchive (${formatBytes(extractedTotal)})`,
+      ],
+      originalTotalBytes: archiveFile.size,
+      outputTotalBytes: extractedTotal,
+    };
+  }
+
+  if (slug === '7z-creator') {
+    const { create7zArchiveWithLibarchive } = await import('../utils/libarchiveHelper');
+    const totalOriginal = files.reduce((acc, f) => acc + f.size, 0);
+    const outName = files.length === 1 ? `${files[0].name}.7z` : 'nexctool-archive.7z';
+    const outFile = await create7zArchiveWithLibarchive(files, outName, options.archivePassword);
+    const savedPct = calculateSavingsPercent(totalOriginal, outFile.size);
+    return {
+      files: [
+        {
+          blob: outFile,
+          filename: outName,
+          mimeType: 'application/x-7z-compressed',
+          size: outFile.size,
+        },
+      ],
+      outputFilename: outName,
+      outputMimeType: 'application/x-7z-compressed',
+      summaryLines: [
+        `Created 7Z archive "${outName}" from ${files.length} file(s) via WASM`,
+        `Total input: ${formatBytes(totalOriginal)} → 7Z size: ${formatBytes(outFile.size)}${savedPct > 0 ? ` (${savedPct}% smaller)` : ''}`,
+      ],
+      originalTotalBytes: totalOriginal,
+      outputTotalBytes: outFile.size,
+    };
+  }
+
   if (slug === 'archive-file-viewer') {
     const archFile = files[0];
     const lower = archFile.name.toLowerCase();

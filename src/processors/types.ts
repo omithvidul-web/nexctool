@@ -34,6 +34,9 @@ export interface ProcessOptions {
   audioAlbum?: string;
   archiveTarget?: 'zip' | 'tar' | 'gz';
   documentWatermark?: string;
+  pdfUserPassword?: string;
+  ocrLang?: string;
+  archivePassword?: string;
 }
 
 export interface ProcessOutputFile {

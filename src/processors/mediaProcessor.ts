@@ -692,6 +692,172 @@ export async function processMediaTool(
   const file = files[0];
   if (!file) throw new Error('Please select a media file first.');
 
+  // 0. FFmpeg WASM Container & Codec Conversions (AVI/MKV -> MP4, MP4 -> MOV, MP3 -> AAC, WAV -> FLAC)
+  if (
+    slug === 'avi-to-mp4' ||
+    slug === 'mkv-to-mp4' ||
+    slug === 'mp4-to-mov' ||
+    slug === 'mp3-to-aac' ||
+    slug === 'wav-to-flac'
+  ) {
+    const { runFfmpegJob } = await import('../utils/ffmpegWasmHelper');
+    const origExt = file.name.split('.').pop()?.toLowerCase() || 'bin';
+
+    if (slug === 'avi-to-mp4' || slug === 'mkv-to-mp4') {
+      const outBytes = await runFfmpegJob(
+        file,
+        origExt,
+        'mp4',
+        (inName, outName) => [
+          '-i',
+          inName,
+          '-vf',
+          'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+          '-c:v',
+          'libx264',
+          '-preset',
+          'ultrafast',
+          '-crf',
+          '23',
+          '-pix_fmt',
+          'yuv420p',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '128k',
+          '-movflags',
+          '+faststart',
+          outName,
+        ],
+        (inName, outName) => [
+          '-i',
+          inName,
+          '-vf',
+          'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+          '-c:v',
+          'libx264',
+          '-preset',
+          'ultrafast',
+          '-pix_fmt',
+          'yuv420p',
+          '-an',
+          '-movflags',
+          '+faststart',
+          outName,
+        ]
+      );
+      const blob = toBinaryBlob(outBytes, 'video/mp4');
+      const filename = replaceExtension(file.name, 'mp4');
+      const savedPct = calculateSavingsPercent(file.size, blob.size);
+      return {
+        files: [{ blob, filename, mimeType: 'video/mp4', size: blob.size }],
+        outputFilename: filename,
+        outputMimeType: 'video/mp4',
+        summaryLines: [
+          `Transcoded ${origExt.toUpperCase()} to H.264/AAC MP4 via FFmpeg WASM`,
+          `${formatBytes(file.size)} → ${formatBytes(blob.size)}${savedPct > 0 ? ` (${savedPct}% smaller)` : ''}`,
+        ],
+        originalTotalBytes: file.size,
+        outputTotalBytes: blob.size,
+      };
+    }
+
+    if (slug === 'mp4-to-mov') {
+      const outBytes = await runFfmpegJob(
+        file,
+        origExt,
+        'mov',
+        (inName, outName) => ['-i', inName, '-c', 'copy', '-f', 'mov', outName],
+        (inName, outName) => [
+          '-i',
+          inName,
+          '-vf',
+          'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+          '-c:v',
+          'libx264',
+          '-preset',
+          'ultrafast',
+          '-pix_fmt',
+          'yuv420p',
+          '-c:a',
+          'aac',
+          '-f',
+          'mov',
+          outName,
+        ]
+      );
+      const blob = toBinaryBlob(outBytes, 'video/quicktime');
+      const filename = replaceExtension(file.name, 'mov');
+      return {
+        files: [{ blob, filename, mimeType: 'video/quicktime', size: blob.size }],
+        outputFilename: filename,
+        outputMimeType: 'video/quicktime',
+        summaryLines: [
+          `Converted "${file.name}" to QuickTime .MOV via FFmpeg WASM`,
+          `${formatBytes(file.size)} → ${formatBytes(blob.size)}`,
+        ],
+        originalTotalBytes: file.size,
+        outputTotalBytes: blob.size,
+      };
+    }
+
+    if (slug === 'mp3-to-aac') {
+      const outBytes = await runFfmpegJob(file, origExt, 'aac', (inName, outName) => [
+        '-i',
+        inName,
+        '-vn',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '192k',
+        '-f',
+        'adts',
+        outName,
+      ]);
+      const blob = toBinaryBlob(outBytes, 'audio/aac');
+      const filename = replaceExtension(file.name, 'aac');
+      const savedPct = calculateSavingsPercent(file.size, blob.size);
+      return {
+        files: [{ blob, filename, mimeType: 'audio/aac', size: blob.size }],
+        outputFilename: filename,
+        outputMimeType: 'audio/aac',
+        summaryLines: [
+          `Encoded "${file.name}" to 192 kbps ADTS AAC via FFmpeg WASM`,
+          `${formatBytes(file.size)} → ${formatBytes(blob.size)}${savedPct > 0 ? ` (${savedPct}% smaller)` : ''}`,
+        ],
+        originalTotalBytes: file.size,
+        outputTotalBytes: blob.size,
+      };
+    }
+
+    if (slug === 'wav-to-flac') {
+      const outBytes = await runFfmpegJob(file, origExt, 'flac', (inName, outName) => [
+        '-i',
+        inName,
+        '-vn',
+        '-c:a',
+        'flac',
+        '-compression_level',
+        '5',
+        outName,
+      ]);
+      const blob = toBinaryBlob(outBytes, 'audio/flac');
+      const filename = replaceExtension(file.name, 'flac');
+      const savedPct = calculateSavingsPercent(file.size, blob.size);
+      return {
+        files: [{ blob, filename, mimeType: 'audio/flac', size: blob.size }],
+        outputFilename: filename,
+        outputMimeType: 'audio/flac',
+        summaryLines: [
+          `Encoded uncompressed WAV to lossless FLAC via FFmpeg WASM`,
+          `${formatBytes(file.size)} → ${formatBytes(blob.size)}${savedPct > 0 ? ` (${savedPct}% smaller)` : ''}`,
+        ],
+        originalTotalBytes: file.size,
+        outputTotalBytes: blob.size,
+      };
+    }
+  }
+
   // 1. Audio Decoding & Pure-JS Encoding / Processing Tools
   if (
     slug === 'mp3-to-wav' ||

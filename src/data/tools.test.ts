@@ -119,6 +119,18 @@ test('all 12 popular tools and newly activated tools are browser-enabled', () =>
     'yaml-to-json',
     'xml-to-json',
     'html-to-markdown',
+    'pdf-password-protect',
+    'pdf-ocr',
+    '7z-extractor',
+    '7z-creator',
+    'rar-extractor',
+    'jpg-to-avif',
+    'png-to-avif',
+    'avi-to-mp4',
+    'mkv-to-mp4',
+    'mp4-to-mov',
+    'mp3-to-aac',
+    'wav-to-flac',
   ];
   for (const slug of activated) {
     const tool = getToolBySlug(slug);
@@ -128,7 +140,7 @@ test('all 12 popular tools and newly activated tools are browser-enabled', () =>
   }
 
   const activeTotal = TOOLS.filter((t) => t.mode !== 'coming-soon').length;
-  assert.ok(activeTotal >= 195, `Expected at least 195 active tools, got ${activeTotal}`);
+  assert.ok(activeTotal >= 207, `Expected at least 207 active tools, got ${activeTotal}`);
 });
 
 test('16 interactive utility, media, OCR, security, and developer tools exist with distinct slugs and interactiveKind', () => {

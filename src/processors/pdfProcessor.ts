@@ -544,6 +544,81 @@ export async function processPdfTool(
     }
   }
 
+  if (slug === 'pdf-password-protect') {
+    const userPwd = (options.pdfUserPassword ?? '').trim();
+    if (!userPwd) {
+      throw new Error('Please enter a password in Options above to lock this PDF.');
+    }
+    const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
+    const u8 = new Uint8Array(srcBytes);
+    const encryptedBytes = await encryptPDF(u8, userPwd, {
+      ownerPassword: userPwd,
+      algorithm: 'AES-256',
+      allowPrinting: true,
+      allowCopying: true,
+      allowModifying: false,
+    });
+    const blob = toPdfBlob(encryptedBytes);
+    const filename = replaceExtension(file.name, 'protected.pdf');
+    return {
+      files: [{ blob, filename, mimeType: 'application/pdf', size: blob.size }],
+      outputFilename: filename,
+      outputMimeType: 'application/pdf',
+      summaryLines: [
+        `Encrypted "${file.name}" with PDF 2.0 AES-256 password protection`,
+        `Output size: ${formatBytes(blob.size)}`,
+      ],
+      originalTotalBytes: file.size,
+      outputTotalBytes: blob.size,
+    };
+  }
+
+  if (slug === 'pdf-ocr') {
+    const lang = options.ocrLang || 'eng';
+    const doc = await loadPdfJsDocument(srcBytes);
+    const { createWorker } = await import('tesseract.js');
+    const worker = await createWorker(lang);
+    const pageTexts: string[] = [];
+
+    try {
+      for (let p = 1; p <= doc.numPages; p++) {
+        const page = await doc.getPage(p);
+        const viewport = page.getViewport({ scale: 2.0 });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(viewport.width);
+        canvas.height = Math.round(viewport.height);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas 2D context unavailable.');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+
+        const {
+          data: { text },
+        } = await worker.recognize(canvas);
+        pageTexts.push(`--- Page ${p} ---\n${text.trim()}`);
+      }
+    } finally {
+      await worker.terminate();
+    }
+
+    const fullText = pageTexts.join('\n\n').trim() || '(No recognizable text detected)';
+    const blob = new Blob([fullText + '\n'], { type: 'text/plain;charset=utf-8' });
+    const filename = replaceExtension(file.name, 'ocr.txt');
+    return {
+      files: [{ blob, filename, mimeType: 'text/plain', size: blob.size }],
+      textOutput: fullText,
+      outputFilename: filename,
+      outputMimeType: 'text/plain',
+      summaryLines: [
+        `Recognized text across ${doc.numPages} rendered PDF page(s) (language: ${lang})`,
+        `Extracted ${fullText.length.toLocaleString()} characters`,
+      ],
+      originalTotalBytes: file.size,
+      outputTotalBytes: blob.size,
+    };
+  }
+
   // Remaining pdf-lib direct document transforms
   const srcDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: slug === 'pdf-unlock' });
   const totalPages = srcDoc.getPageCount();

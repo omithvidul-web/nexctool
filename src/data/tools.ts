@@ -38,7 +38,10 @@ export interface ToolOptionConfig {
     | 'audio-speed'
     | 'audio-meta'
     | 'archive-target'
-    | 'doc-watermark';
+    | 'doc-watermark'
+    | 'pdf-password'
+    | 'ocr-lang'
+    | 'archive-password';
 }
 
 export interface CategoryMeta {
@@ -230,9 +233,9 @@ const RAW_TOOLS: RawToolSeed[] = [
   { id: 4, name: 'WebP to JPG', category: 'image-tools', accept: '.webp,image/webp', mode: 'browser', actionLabel: 'Convert to JPG', optionType: 'background', lazyGroup: 'image', description: 'Turn WebP images into universally compatible JPG files.' },
   { id: 5, name: 'PNG to WebP', category: 'image-tools', accept: '.png,image/png', mode: 'browser', actionLabel: 'Convert to WebP', optionType: 'quality', lazyGroup: 'image', description: 'Convert PNG graphics to WebP while preserving crisp transparency.' },
   { id: 6, name: 'WebP to PNG', category: 'image-tools', accept: '.webp,image/webp', mode: 'browser', actionLabel: 'Convert to PNG', lazyGroup: 'image', description: 'Convert WebP images to standard PNG format with transparency.' },
-  { id: 7, name: 'JPG to AVIF', category: 'image-tools', accept: '.jpg,.jpeg,image/jpeg', mode: 'coming-soon' },
+  { id: 7, name: 'JPG to AVIF', category: 'image-tools', accept: '.jpg,.jpeg,image/jpeg', mode: 'browser', actionLabel: 'Convert to AVIF', optionType: 'quality', lazyGroup: 'image', description: 'Encode JPG photos into ultra-compact next-gen AVIF images locally via WebAssembly.' },
   { id: 8, name: 'AVIF to JPG', category: 'image-tools', accept: '.avif,image/avif', mode: 'browser', actionLabel: 'Convert to JPG', optionType: 'background', lazyGroup: 'image', description: 'Decode AVIF images and export universally compatible JPG files locally.' },
-  { id: 9, name: 'PNG to AVIF', category: 'image-tools', accept: '.png,image/png', mode: 'coming-soon' },
+  { id: 9, name: 'PNG to AVIF', category: 'image-tools', accept: '.png,image/png', mode: 'browser', actionLabel: 'Convert to AVIF', optionType: 'quality', lazyGroup: 'image', description: 'Convert transparent PNG images into next-gen AVIF files cleanly inside your browser.' },
   { id: 10, name: 'AVIF to PNG', category: 'image-tools', accept: '.avif,image/avif', mode: 'browser', actionLabel: 'Convert to PNG', lazyGroup: 'image', description: 'Convert AVIF images to lossless PNG format with transparency inside your browser.' },
   { id: 11, name: 'HEIC to JPG', category: 'image-tools', accept: '.heic,.heif', mode: 'browser', actionLabel: 'Convert to JPG', optionType: 'quality', lazyGroup: 'image', description: 'Convert Apple HEIC/HEIF photos into standard JPG images offline.' },
   { id: 12, name: 'HEIC to PNG', category: 'image-tools', accept: '.heic,.heif', mode: 'browser', actionLabel: 'Convert to PNG', lazyGroup: 'image', description: 'Decode iPhone HEIC/HEIF photos into lossless PNG images privately.' },
@@ -278,9 +281,9 @@ const RAW_TOOLS: RawToolSeed[] = [
   { id: 50, name: 'Rotate PDF Pages', category: 'pdf-tools', mode: 'browser', actionLabel: 'Rotate PDF', popular: true, optionType: 'rotation', lazyGroup: 'pdf', description: 'Rotate all pages in a PDF document by 90, 180, or 270 degrees locally.' },
   { id: 51, name: 'PDF Watermark', category: 'pdf-tools', mode: 'browser', actionLabel: 'Add Watermark', optionType: 'watermark', lazyGroup: 'pdf', description: 'Stamp custom diagonal text watermarks onto every PDF page locally.' },
   { id: 52, name: 'PDF Page Numbers', category: 'pdf-tools', mode: 'browser', actionLabel: 'Add Page Numbers', lazyGroup: 'pdf', description: 'Stamp clean footer page numbers onto every page of a PDF locally.' },
-  { id: 53, name: 'PDF Password Protect', category: 'pdf-tools', mode: 'coming-soon' },
+  { id: 53, name: 'PDF Password Protect', category: 'pdf-tools', mode: 'browser', actionLabel: 'Protect PDF', optionType: 'pdf-password', lazyGroup: 'pdf', description: 'Lock any PDF with AES-256 password encryption locally using Web Crypto without uploading.' },
   { id: 54, name: 'PDF Unlock', category: 'pdf-tools', mode: 'browser', actionLabel: 'Unlock Restrictions', lazyGroup: 'pdf', description: 'Remove owner editing & print restrictions from permission-locked PDFs locally.' },
-  { id: 55, name: 'PDF OCR', category: 'pdf-tools', mode: 'coming-soon' },
+  { id: 55, name: 'PDF OCR', category: 'pdf-tools', mode: 'browser', actionLabel: 'Run PDF OCR', optionType: 'ocr-lang', lazyGroup: 'pdf', description: 'Extract selectable text from scanned PDF documents using browser WebAssembly OCR in English, Sinhala, Tamil, and more.' },
   { id: 56, name: 'PDF Text Extractor', category: 'pdf-tools', mode: 'browser', actionLabel: 'Extract Text', lazyGroup: 'pdf', description: 'Extract selectable text page by page from any PDF document offline.' },
   { id: 57, name: 'PDF Signer', category: 'pdf-tools', mode: 'browser', actionLabel: 'Sign PDF', optionType: 'signature', lazyGroup: 'pdf', description: 'Stamp a clean signature block with date onto the final page of your PDF locally.' },
   { id: 58, name: 'PDF Form Filler', category: 'pdf-tools', mode: 'browser', actionLabel: 'Fill PDF Form', optionType: 'form-fields', lazyGroup: 'pdf', description: 'Inspect and populate AcroForm text & checkbox fields inside PDFs privately.' },
@@ -362,9 +365,9 @@ const RAW_TOOLS: RawToolSeed[] = [
   { id: 126, name: 'MP4 to WebM', category: 'video-tools', accept: '.mp4,video/mp4', mode: 'browser', actionLabel: 'Convert to WebM', lazyGroup: 'media', description: 'Re-encode browser-playable MP4 clips into WebM format right inside your browser.' },
   { id: 127, name: 'WebM to MP4', category: 'video-tools', accept: '.webm,video/webm', mode: 'browser', actionLabel: 'Convert to MP4', lazyGroup: 'media', description: 'Convert WebM recordings into MP4/WebM video locally with zero uploads.' },
   { id: 128, name: 'MOV to MP4', category: 'video-tools', accept: '.mov,video/quicktime,video/mp4', mode: 'browser', actionLabel: 'Convert to MP4', lazyGroup: 'media', description: 'Re-encode browser-supported QuickTime .mov clips locally in your browser.' },
-  { id: 129, name: 'AVI to MP4', category: 'video-tools', accept: '.avi,video/x-msvideo', mode: 'coming-soon', lazyGroup: 'media' },
-  { id: 130, name: 'MKV to MP4', category: 'video-tools', accept: '.mkv', mode: 'coming-soon', lazyGroup: 'media' },
-  { id: 131, name: 'MP4 to MOV', category: 'video-tools', accept: '.mp4', mode: 'coming-soon', lazyGroup: 'media' },
+  { id: 129, name: 'AVI to MP4', category: 'video-tools', accept: '.avi,video/x-msvideo,video/*', mode: 'browser', actionLabel: 'Convert to MP4', lazyGroup: 'media', description: 'Transcode AVI videos into universal H.264/AAC MP4 files directly in your browser using FFmpeg WebAssembly.' },
+  { id: 130, name: 'MKV to MP4', category: 'video-tools', accept: '.mkv,video/x-matroska,video/*', mode: 'browser', actionLabel: 'Convert to MP4', lazyGroup: 'media', description: 'Convert Matroska (.mkv) videos into browser-friendly MP4 format locally via FFmpeg WebAssembly.' },
+  { id: 131, name: 'MP4 to MOV', category: 'video-tools', accept: '.mp4,video/mp4', mode: 'browser', actionLabel: 'Convert to MOV', lazyGroup: 'media', description: 'Remux or transcode MP4 videos into Apple QuickTime (.mov) containers inside your browser.' },
   { id: 132, name: 'Video Compressor', category: 'video-tools', accept: 'video/*,.mp4,.webm,.mov,.m4v', mode: 'browser', actionLabel: 'Compress Video', optionType: 'quality', lazyGroup: 'media', description: 'Lower video bitrate cleanly in your browser to shrink clip size privately.' },
   { id: 133, name: 'Video Resizer', category: 'video-tools', accept: 'video/*,.mp4,.webm,.mov,.m4v', mode: 'browser', actionLabel: 'Resize Video', optionType: 'dimensions', lazyGroup: 'media', description: 'Scale video clips to custom pixel width and height directly in your browser.' },
   { id: 134, name: 'Video Trimmer', category: 'video-tools', accept: 'video/*,.mp4,.webm,.mov,.m4v', mode: 'browser', actionLabel: 'Trim Video', optionType: 'audio-trim', lazyGroup: 'media', description: 'Cut a video clip between custom start and end timestamps locally.' },
@@ -386,9 +389,9 @@ const RAW_TOOLS: RawToolSeed[] = [
   { id: 148, name: 'M4A to MP3', category: 'audio-tools', accept: '.m4a,audio/mp4', mode: 'browser', actionLabel: 'Convert to MP3', lazyGroup: 'media', description: 'Decode M4A audio files and encode to MP3 locally with zero server uploads.' },
   { id: 149, name: 'FLAC to MP3', category: 'audio-tools', accept: '.flac,audio/flac', mode: 'browser', actionLabel: 'Convert to MP3', lazyGroup: 'media', description: 'Transcode lossless FLAC tracks to portable MP3 inside your browser.' },
   { id: 150, name: 'OGG to MP3', category: 'audio-tools', accept: '.ogg,audio/ogg', mode: 'browser', actionLabel: 'Convert to MP3', lazyGroup: 'media', description: 'Convert OGG Vorbis audio files to standard MP3 offline.' },
-  { id: 151, name: 'MP3 to AAC', category: 'audio-tools', accept: '.mp3', mode: 'coming-soon', lazyGroup: 'media' },
+  { id: 151, name: 'MP3 to AAC', category: 'audio-tools', accept: '.mp3,audio/mpeg', mode: 'browser', actionLabel: 'Convert to AAC', lazyGroup: 'media', description: 'Convert MP3 audio tracks to 192 kbps ADTS AAC (.aac) locally via FFmpeg WebAssembly.' },
   { id: 152, name: 'AAC to MP3', category: 'audio-tools', accept: '.aac,audio/aac', mode: 'browser', actionLabel: 'Convert to MP3', lazyGroup: 'media', description: 'Decode AAC audio streams and re-encode as MP3 locally.' },
-  { id: 153, name: 'WAV to FLAC', category: 'audio-tools', accept: '.wav', mode: 'coming-soon', lazyGroup: 'media' },
+  { id: 153, name: 'WAV to FLAC', category: 'audio-tools', accept: '.wav,audio/wav', mode: 'browser', actionLabel: 'Convert to FLAC', lazyGroup: 'media', description: 'Compress uncompressed WAV audio into lossless FLAC format directly inside your browser.' },
   { id: 154, name: 'Audio Compressor', category: 'audio-tools', accept: 'audio/*', mode: 'browser', actionLabel: 'Compress Audio', lazyGroup: 'media', description: 'Apply Web Audio dynamic range compression and export smaller MP3 files.' },
   { id: 155, name: 'Audio Trimmer', category: 'audio-tools', accept: 'audio/*', mode: 'browser', actionLabel: 'Trim Audio', optionType: 'audio-trim', lazyGroup: 'media', description: 'Cut audio files to exact start and end seconds right inside your browser.' },
   { id: 156, name: 'Audio Merger', category: 'audio-tools', accept: 'audio/*', multiple: true, mode: 'browser', actionLabel: 'Merge Audio Files', lazyGroup: 'media', description: 'Concatenate multiple audio clips sequentially into one seamless track.' },
@@ -400,9 +403,9 @@ const RAW_TOOLS: RawToolSeed[] = [
   // 8. ARCHIVE TOOLS (12)
   { id: 161, name: 'ZIP Creator', category: 'archive-tools', accept: '*/*', multiple: true, mode: 'browser', actionLabel: 'Create ZIP Archive', popular: true, lazyGroup: 'utility', description: 'Compress multiple files into a standard .zip archive locally inside your browser.' },
   { id: 162, name: 'ZIP Extractor', category: 'archive-tools', accept: '.zip,application/zip', mode: 'browser', actionLabel: 'Extract ZIP Files', lazyGroup: 'utility', description: 'Inspect and extract all files from a .zip archive directly in your browser.' },
-  { id: 163, name: '7Z Extractor', category: 'archive-tools', accept: '.7z', mode: 'coming-soon' },
-  { id: 164, name: '7Z Creator', category: 'archive-tools', accept: '*/*', multiple: true, mode: 'coming-soon' },
-  { id: 165, name: 'RAR Extractor', category: 'archive-tools', accept: '.rar', mode: 'coming-soon', description: 'Extract files from RAR archives without leaving your device.' },
+  { id: 163, name: '7Z Extractor', category: 'archive-tools', accept: '.7z,application/x-7z-compressed', mode: 'browser', actionLabel: 'Extract 7Z', optionType: 'archive-password', lazyGroup: 'utility', description: 'Unpack 7-Zip (.7z) archives locally inside your browser using WASM libarchive.' },
+  { id: 164, name: '7Z Creator', category: 'archive-tools', accept: '*/*', multiple: true, mode: 'browser', actionLabel: 'Create 7Z Archive', optionType: 'archive-password', lazyGroup: 'utility', description: 'Compress multiple files into a .7z archive locally inside your browser using WebAssembly.' },
+  { id: 165, name: 'RAR Extractor', category: 'archive-tools', accept: '.rar,application/vnd.rar,application/x-rar-compressed', mode: 'browser', actionLabel: 'Extract RAR', optionType: 'archive-password', lazyGroup: 'utility', description: 'Extract files from RAR archives cleanly inside your browser via WASM libarchive without leaving your device.' },
   { id: 166, name: 'TAR Extractor', category: 'archive-tools', accept: '.tar,.tar.gz,.tgz', mode: 'browser', actionLabel: 'Extract TAR Archive', lazyGroup: 'utility', description: 'Extract files from .tar and .tar.gz archives directly in your browser.' },
   { id: 167, name: 'TAR Creator', category: 'archive-tools', accept: '*/*', multiple: true, mode: 'browser', actionLabel: 'Create TAR Archive', lazyGroup: 'utility', description: 'Pack multiple files into a POSIX USTAR .tar archive 100% locally.' },
   { id: 168, name: 'GZIP Compressor', category: 'archive-tools', accept: '*/*', mode: 'browser', actionLabel: 'Compress to GZIP', lazyGroup: 'utility', description: 'Compress any file to .gz using your browser’s built-in CompressionStream API.' },

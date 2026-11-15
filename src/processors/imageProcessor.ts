@@ -375,6 +375,55 @@ export async function processImageTool(
       };
     }
 
+    if (slug === 'jpg-to-avif' || slug === 'png-to-avif') {
+      const canvas = document.createElement('canvas');
+      canvas.width = naturalWidth;
+      canvas.height = naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas 2D context unavailable.');
+      if (slug === 'jpg-to-avif') {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, naturalWidth, naturalHeight);
+      }
+      src.drawToCanvas(ctx, naturalWidth, naturalHeight);
+      const imageData = ctx.getImageData(0, 0, naturalWidth, naturalHeight);
+
+      const [{ default: encodeAvif, init: initAvifEncode }, { default: avifEncWasmUrl }] =
+        await Promise.all([
+          import('@jsquash/avif/encode.js'),
+          import('@jsquash/avif/codec/enc/avif_enc.wasm?url'),
+        ]);
+      await initAvifEncode({
+        locateFile: (path: string) => (path.endsWith('.wasm') ? avifEncWasmUrl : path),
+      });
+
+      const q = Math.min(100, Math.max(10, options.quality ?? 75));
+      const avifBuffer = await encodeAvif(imageData, {
+        quality: q,
+        speed: 6,
+      });
+      const avifBytes = new Uint8Array(avifBuffer);
+      const copy = new Uint8Array(avifBytes.byteLength);
+      copy.set(avifBytes);
+      const blob = new Blob([copy.buffer], { type: 'image/avif' });
+      const filename = replaceExtension(file.name, 'avif');
+      const savedPct = calculateSavingsPercent(file.size, blob.size);
+      const previewDataUrl = canvas.toDataURL('image/png');
+
+      return {
+        files: [{ blob, filename, mimeType: 'image/avif', size: blob.size }],
+        outputFilename: filename,
+        outputMimeType: 'image/avif',
+        previewDataUrl,
+        summaryLines: [
+          `Encoded ${naturalWidth} × ${naturalHeight} px image to AVIF (quality ${q}%)`,
+          `Original size: ${formatBytes(file.size)} → AVIF size: ${formatBytes(blob.size)}${savedPct > 0 ? ` (${savedPct}% smaller)` : ''}`,
+        ],
+        originalTotalBytes: file.size,
+        outputTotalBytes: blob.size,
+      };
+    }
+
     let cropRect: { sx: number; sy: number; sw: number; sh: number } | null = null;
     let targetWidth = naturalWidth;
     let targetHeight = naturalHeight;

@@ -76,6 +76,9 @@ export function ToolPage() {
     audioAlbum: '',
     archiveTarget: 'zip',
     documentWatermark: 'CONFIDENTIAL',
+    pdfUserPassword: '',
+    ocrLang: 'eng',
+    archivePassword: '',
   });
 
   const [processing, setProcessing] = useState(false);
@@ -1073,6 +1076,71 @@ export function ToolPage() {
                           </button>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {tool.optionType === 'pdf-password' && (
+                    <div className="max-w-sm">
+                      <label htmlFor="opt-pdf-pwd" className="block text-sm font-medium text-slate-800 dark:text-slate-200 mb-1">
+                        PDF Protection Password (AES-256)
+                      </label>
+                      <input
+                        id="opt-pdf-pwd"
+                        type="password"
+                        value={options.pdfUserPassword ?? ''}
+                        onChange={(e) => setOptions((o) => ({ ...o, pdfUserPassword: e.target.value }))}
+                        placeholder="Enter password to lock PDF..."
+                        className="w-full h-10 px-3 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
+                      />
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Required to open the encrypted PDF. Encrypted locally with AES-256.
+                      </p>
+                    </div>
+                  )}
+
+                  {tool.optionType === 'ocr-lang' && (
+                    <div className="max-w-xs">
+                      <label htmlFor="opt-ocr-lang" className="block text-sm font-medium text-slate-800 dark:text-slate-200 mb-1">
+                        OCR Recognition Language
+                      </label>
+                      <select
+                        id="opt-ocr-lang"
+                        value={options.ocrLang ?? 'eng'}
+                        onChange={(e) => setOptions((o) => ({ ...o, ocrLang: e.target.value }))}
+                        className="w-full h-10 px-3 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
+                      >
+                        <option value="eng">English (eng)</option>
+                        <option value="sin">Sinhala (සිංහල)</option>
+                        <option value="tam">Tamil (தமிழ்)</option>
+                        <option value="eng+sin">English + Sinhala</option>
+                        <option value="spa">Spanish (spa)</option>
+                        <option value="fra">French (fra)</option>
+                        <option value="deu">German (deu)</option>
+                        <option value="hin">Hindi (hin)</option>
+                        <option value="ara">Arabic (ara)</option>
+                        <option value="jpn">Japanese (jpn)</option>
+                        <option value="chi_sim">Chinese Simplified</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {tool.optionType === 'archive-password' && (
+                    <div className="max-w-sm">
+                      <label htmlFor="opt-arch-pwd" className="block text-sm font-medium text-slate-800 dark:text-slate-200 mb-1">
+                        Archive Password (Optional)
+                      </label>
+                      <input
+                        id="opt-arch-pwd"
+                        type="password"
+                        value={options.archivePassword ?? ''}
+                        onChange={(e) => setOptions((o) => ({ ...o, archivePassword: e.target.value }))}
+                        placeholder={
+                          tool.slug === '7z-creator'
+                            ? 'Leave blank for unencrypted .7z...'
+                            : 'Leave blank if archive is not encrypted...'
+                        }
+                        className="w-full h-10 px-3 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
+                      />
                     </div>
                   )}
                 </div>
