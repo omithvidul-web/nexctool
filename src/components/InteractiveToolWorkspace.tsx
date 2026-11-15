@@ -14,6 +14,21 @@ const ImageCollageTool = lazy(() =>
 const InvoicePdfTool = lazy(() =>
   import('./tools/InvoicePdfTool').then((m) => ({ default: m.InvoicePdfTool }))
 );
+const ImageOcrTool = lazy(() =>
+  import('./tools/ImageOcrTool').then((m) => ({ default: m.ImageOcrTool }))
+);
+const ScreenVoiceRecorderTool = lazy(() =>
+  import('./tools/ScreenVoiceRecorderTool').then((m) => ({ default: m.ScreenVoiceRecorderTool }))
+);
+const SubtitleTool = lazy(() =>
+  import('./tools/SubtitleTool').then((m) => ({ default: m.SubtitleTool }))
+);
+const SocialVideoResizerTool = lazy(() =>
+  import('./tools/SocialVideoResizerTool').then((m) => ({ default: m.SocialVideoResizerTool }))
+);
+const RingtoneMakerTool = lazy(() =>
+  import('./tools/RingtoneMakerTool').then((m) => ({ default: m.RingtoneMakerTool }))
+);
 
 interface InteractiveToolWorkspaceProps {
   tool: ToolItem;
@@ -33,6 +48,11 @@ export function InteractiveToolWorkspace({ tool }: InteractiveToolWorkspaceProps
       {tool.interactiveKind === 'image-blur' && <ImageBlurRedactorTool />}
       {tool.interactiveKind === 'image-collage' && <ImageCollageTool />}
       {tool.interactiveKind === 'invoice-pdf' && <InvoicePdfTool />}
+      {tool.interactiveKind === 'image-ocr' && <ImageOcrTool />}
+      {tool.interactiveKind === 'screen-voice-recorder' && <ScreenVoiceRecorderTool />}
+      {tool.interactiveKind === 'subtitle-tool' && <SubtitleTool />}
+      {tool.interactiveKind === 'social-video-pad' && <SocialVideoResizerTool />}
+      {tool.interactiveKind === 'ringtone-maker' && <RingtoneMakerTool />}
     </Suspense>
   );
 }

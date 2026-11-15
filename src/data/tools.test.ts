@@ -10,9 +10,9 @@ import {
   searchTools,
 } from './tools';
 
-test('catalog has exact 214 tools and 10 categories', () => {
+test('catalog has exact 219 tools and 10 categories', () => {
   assert.equal(CATEGORIES.length, 10);
-  assert.equal(TOOLS.length, 214);
+  assert.equal(TOOLS.length, 219);
   assert.equal(POPULAR_TOOLS.length, 12);
 });
 
@@ -26,8 +26,8 @@ test('every category matches its expected tool count', () => {
 test('all tool slugs and ids are unique', () => {
   const slugs = new Set(TOOLS.map((t) => t.slug));
   const ids = new Set(TOOLS.map((t) => t.id));
-  assert.equal(slugs.size, 214);
-  assert.equal(ids.size, 214);
+  assert.equal(slugs.size, 219);
+  assert.equal(ids.size, 219);
 });
 
 test('the 5 required core tools exist and are browser-enabled', () => {
@@ -131,13 +131,18 @@ test('all 12 popular tools and newly activated tools are browser-enabled', () =>
   assert.ok(activeTotal >= 195, `Expected at least 195 active tools, got ${activeTotal}`);
 });
 
-test('5 new everyday interactive tools exist with distinct slugs and interactiveKind', () => {
+test('10 new interactive utility, media, creator, and OCR tools exist with distinct slugs and interactiveKind', () => {
   const newSlugs = [
     'qr-code-generator-scanner',
     'favicon-generator',
     'image-blur-redactor',
     'image-collage-joiner',
     'invoice-pdf-generator',
+    'image-to-text-ocr',
+    'screen-voice-recorder',
+    'subtitle-converter-shifter',
+    'social-video-resizer',
+    'ringtone-maker',
   ];
   const kinds = new Set<string>();
   for (const slug of newSlugs) {
@@ -147,7 +152,7 @@ test('5 new everyday interactive tools exist with distinct slugs and interactive
     assert.ok(tool.interactiveKind, `Missing interactiveKind on ${slug}`);
     kinds.add(tool.interactiveKind);
   }
-  assert.equal(kinds.size, 5);
+  assert.equal(kinds.size, 10);
 });
 
 

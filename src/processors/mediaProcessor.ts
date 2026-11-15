@@ -160,7 +160,7 @@ function pickSupportedVideoMime(
     : { mime: 'video/webm', ext: 'webm' };
 }
 
-function createSafeMediaRecorder(
+export function createSafeMediaRecorder(
   stream: MediaStream,
   fallbackVideoOnlyStream: MediaStream,
   preferMp4: boolean,
@@ -224,7 +224,7 @@ function createSafeMediaRecorder(
     : new Error('Unable to initialize browser video recorder for this format.');
 }
 
-async function decodeAudioBufferResilient(audioCtx: AudioContext, file: File): Promise<AudioBuffer> {
+export async function decodeAudioBufferResilient(audioCtx: AudioContext, file: File): Promise<AudioBuffer> {
   const raw = await file.arrayBuffer();
 
   // 1. Demux raw AAC frames into a pure ADTS .aac stream (strips HEVC hvc1/hev1/dvh1 video & QuickTime atoms)
@@ -253,7 +253,7 @@ async function decodeAudioBufferResilient(audioCtx: AudioContext, file: File): P
   return await audioCtx.decodeAudioData(raw.slice(0));
 }
 
-async function tryDecodeVideoAudio(audioCtx: AudioContext | null, file: File): Promise<AudioBuffer | null> {
+export async function tryDecodeVideoAudio(audioCtx: AudioContext | null, file: File): Promise<AudioBuffer | null> {
   if (!audioCtx || file.size > 300 * 1024 * 1024) return null;
   try {
     return await decodeAudioBufferResilient(audioCtx, file);
@@ -262,7 +262,7 @@ async function tryDecodeVideoAudio(audioCtx: AudioContext | null, file: File): P
   }
 }
 
-function loadVideoMetadata(
+export function loadVideoMetadata(
   file: File
 ): Promise<{ video: HTMLVideoElement; url: string; cleanup: () => void }> {
   return new Promise((resolve, reject) => {

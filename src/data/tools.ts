@@ -67,7 +67,12 @@ export type InteractiveToolKind =
   | 'favicon-pack'
   | 'image-blur'
   | 'image-collage'
-  | 'invoice-pdf';
+  | 'invoice-pdf'
+  | 'image-ocr'
+  | 'screen-voice-recorder'
+  | 'subtitle-tool'
+  | 'social-video-pad'
+  | 'ringtone-maker';
 
 export interface ToolItem {
   id: number;
@@ -95,7 +100,7 @@ export const CATEGORIES: CategoryMeta[] = [
     shortName: 'Images',
     description: 'Convert, compress, resize, rotate, and optimize images locally in your browser.',
     icon: 'image',
-    expectedCount: 33,
+    expectedCount: 34,
   },
   {
     slug: 'pdf-tools',
@@ -133,17 +138,17 @@ export const CATEGORIES: CategoryMeta[] = [
     slug: 'video-tools',
     name: 'Video Tools',
     shortName: 'Video',
-    description: 'Extract thumbnails, inspect metadata, and process video clips privately.',
+    description: 'Extract thumbnails, record screen, resize for social media, and process video clips privately.',
     icon: 'video',
-    expectedCount: 20,
+    expectedCount: 23,
   },
   {
     slug: 'audio-tools',
     name: 'Audio Tools',
     shortName: 'Audio',
-    description: 'Convert, trim, and inspect audio files directly inside your browser.',
+    description: 'Convert, trim, create ringtones with fades, and inspect audio files directly inside your browser.',
     icon: 'music',
-    expectedCount: 15,
+    expectedCount: 16,
   },
   {
     slug: 'archive-tools',
@@ -605,6 +610,68 @@ const RAW_TOOLS: RawToolSeed[] = [
     lazyGroup: 'pdf',
     interactiveKind: 'invoice-pdf',
     description: 'Create clean, professional invoices, receipts, and quotes with line items, taxes, discounts, and logo—exported as PDF locally.',
+  },
+
+  // 12. MEDIA, CREATOR & OCR TOOLS (215-219)
+  {
+    id: 215,
+    name: 'Image & Screenshot to Text (OCR)',
+    slug: 'image-to-text-ocr',
+    category: 'image-tools',
+    accept: 'image/*',
+    mode: 'browser',
+    actionLabel: 'Extract Text (OCR)',
+    lazyGroup: 'image',
+    interactiveKind: 'image-ocr',
+    description: 'Extract editable text from screenshots, photos, and scanned images locally in multiple languages including English and Sinhala.',
+  },
+  {
+    id: 216,
+    name: 'Screen & Voice Recorder',
+    slug: 'screen-voice-recorder',
+    category: 'video-tools',
+    accept: '*/*',
+    mode: 'text-or-file',
+    actionLabel: 'Start Recording',
+    lazyGroup: 'media',
+    interactiveKind: 'screen-voice-recorder',
+    description: 'Record your screen with system/mic audio or record voice notes with live waveform and export as MP4, WebM, MP3, or WAV locally.',
+  },
+  {
+    id: 217,
+    name: 'Subtitle Converter & Time Shifter',
+    slug: 'subtitle-converter-shifter',
+    category: 'video-tools',
+    accept: '.srt,.vtt,.txt',
+    mode: 'text-or-file',
+    actionLabel: 'Convert & Shift Subtitles',
+    lazyGroup: 'text',
+    interactiveKind: 'subtitle-tool',
+    description: 'Convert subtitles between .srt, .vtt, and .txt formats and shift timing forward or backward in seconds locally.',
+  },
+  {
+    id: 218,
+    name: 'Social Media Video Resizer',
+    slug: 'social-video-resizer',
+    category: 'video-tools',
+    accept: 'video/*,.mp4,.mov,.m4v,.webm',
+    mode: 'browser',
+    actionLabel: 'Resize Video',
+    lazyGroup: 'media',
+    interactiveKind: 'social-video-pad',
+    description: 'Pad or crop videos to 9:16 Reels/TikTok, 1:1 Square, or 4:5 Feed with blurred video background and preserved audio.',
+  },
+  {
+    id: 219,
+    name: 'Ringtone Maker (Audio Fade In/Out)',
+    slug: 'ringtone-maker',
+    category: 'audio-tools',
+    accept: 'audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac',
+    mode: 'browser',
+    actionLabel: 'Export Ringtone',
+    lazyGroup: 'media',
+    interactiveKind: 'ringtone-maker',
+    description: 'Trim any audio track with waveform preview, add smooth Fade-In and Fade-Out ramps, preview live, and export as MP3 or WAV.',
   },
 ];
 

@@ -100,6 +100,76 @@ const INTERACTIVE_STEPS: Record<string, { title: string; description: string }[]
       description: 'Click Download PDF to generate a clean printable PDF document completely offline inside your browser.',
     },
   ],
+  'image-ocr': [
+    {
+      title: 'Upload image or paste screenshot',
+      description: 'Select an image file or press Ctrl+V to paste a screenshot directly into the browser OCR workspace.',
+    },
+    {
+      title: 'Choose language & extract text',
+      description: 'Pick English, Sinhala, Tamil, or another supported language and run WebAssembly OCR locally.',
+    },
+    {
+      title: 'Edit, copy, or download .txt',
+      description: 'Review the recognized text side-by-side with your image and copy to clipboard or save as a .txt file.',
+    },
+  ],
+  'screen-voice-recorder': [
+    {
+      title: 'Pick Screen or Voice recording mode',
+      description: 'Choose Screen Recorder (with optional system & microphone audio) or Voice Recorder with live waveform.',
+    },
+    {
+      title: 'Record, pause, and stop locally',
+      description: 'Capture your screen or microphone directly inside your browser tab without installing extensions.',
+    },
+    {
+      title: 'Preview and download video or audio',
+      description: 'Play back your recording immediately and download as MP4/WebM video or MP3/WAV audio.',
+    },
+  ],
+  'subtitle-tool': [
+    {
+      title: 'Upload or paste .SRT / .VTT subtitles',
+      description: 'Load an existing .srt or .vtt file or paste raw subtitle cues directly into the editor.',
+    },
+    {
+      title: 'Shift timing & choose target format',
+      description: 'Adjust timestamps forward or backward in seconds and pick .srt, .vtt, or .txt output.',
+    },
+    {
+      title: 'Copy or download converted subtitles',
+      description: 'Inspect the live output with exact cue counts and download or copy in one click.',
+    },
+  ],
+  'social-video-pad': [
+    {
+      title: 'Upload your video clip',
+      description: 'Load an MP4, MOV, or WebM video clip directly in your browser with full audio support.',
+    },
+    {
+      title: 'Pick 9:16, 1:1, 4:5, or 16:9 & background',
+      description: 'Choose TikTok/Reels vertical, Square, or Feed ratio and select Blurred Video BG, Solid Color, or Center Crop.',
+    },
+    {
+      title: 'Render and download privately',
+      description: 'Export the resized video directly on your device with audio intact and zero server uploads.',
+    },
+  ],
+  'ringtone-maker': [
+    {
+      title: 'Upload your song or audio clip',
+      description: 'Load MP3, WAV, M4A, OGG, or FLAC audio and inspect its visual waveform immediately.',
+    },
+    {
+      title: 'Set Start, End, Fade-In & Fade-Out',
+      description: 'Trim your exact favorite clip, apply smooth fade-in and fade-out ramps, and test with Preview Ringtone.',
+    },
+    {
+      title: 'Download as MP3 or WAV',
+      description: 'Export your finished custom ringtone in seconds directly inside your browser.',
+    },
+  ],
 };
 
 export function buildToolSeoContent(tool: ToolItem): ToolSeoContent {
