@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CATEGORIES, TOOLS } from '../src/data/tools';
 
@@ -42,7 +42,6 @@ ${urls
 </urlset>
 `;
 
-
 const robotsTxt = `User-agent: *
 Allow: /
 
@@ -51,5 +50,28 @@ Sitemap: ${BASE_URL}/sitemap.xml
 
 writeFileSync(resolve(publicDir, 'sitemap.xml'), sitemapXml, 'utf8');
 writeFileSync(resolve(publicDir, 'robots.txt'), robotsTxt, 'utf8');
+
+// Split @ffmpeg/core WASM (~30.7 MiB) into two <16 MiB chunks so static hosts
+// with a 25 MiB per-asset cap (e.g. Cloudflare Workers Assets) deploy cleanly.
+const ffmpegWasmSrc = resolve(process.cwd(), 'node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.wasm');
+const ffmpegPublicDir = resolve(publicDir, 'wasm/ffmpeg');
+const part1Path = resolve(ffmpegPublicDir, 'ffmpeg-core-part1.bin');
+const part2Path = resolve(ffmpegPublicDir, 'ffmpeg-core-part2.bin');
+
+if (existsSync(ffmpegWasmSrc)) {
+  mkdirSync(ffmpegPublicDir, { recursive: true });
+  const srcSize = statSync(ffmpegWasmSrc).size;
+  const alreadySynced =
+    existsSync(part1Path) &&
+    existsSync(part2Path) &&
+    statSync(part1Path).size + statSync(part2Path).size === srcSize;
+
+  if (!alreadySynced) {
+    const raw = readFileSync(ffmpegWasmSrc);
+    const midpoint = Math.ceil(raw.byteLength / 2);
+    writeFileSync(part1Path, raw.subarray(0, midpoint));
+    writeFileSync(part2Path, raw.subarray(midpoint));
+  }
+}
 
 console.log(`Generated sitemap.xml (${urls.length} URLs), robots.txt in public/`);

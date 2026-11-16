@@ -1,11 +1,33 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL } from '@ffmpeg/util';
 import coreUrlAsset from '@ffmpeg/core?url';
-import wasmUrlAsset from '@ffmpeg/core/wasm?url';
 
 let ffmpegInstance: FFmpeg | null = null;
 let loadPromise: Promise<FFmpeg> | null = null;
 let jobMutex: Promise<unknown> = Promise.resolve();
+
+async function loadChunkedFfmpegWasmUrl(): Promise<string> {
+  const [res1, res2] = await Promise.all([
+    fetch('/wasm/ffmpeg/ffmpeg-core-part1.bin'),
+    fetch('/wasm/ffmpeg/ffmpeg-core-part2.bin'),
+  ]);
+  if (!res1.ok || !res2.ok) {
+    throw new Error('Failed to download FFmpeg WebAssembly runtime chunks.');
+  }
+  const [buf1, buf2] = await Promise.all([res1.arrayBuffer(), res2.arrayBuffer()]);
+  const magic = new Uint8Array(buf1, 0, Math.min(4, buf1.byteLength));
+  if (
+    magic.length < 4 ||
+    magic[0] !== 0x00 ||
+    magic[1] !== 0x61 ||
+    magic[2] !== 0x73 ||
+    magic[3] !== 0x6d
+  ) {
+    throw new Error('Invalid FFmpeg WebAssembly header received.');
+  }
+  const wasmBlob = new Blob([buf1, buf2], { type: 'application/wasm' });
+  return URL.createObjectURL(wasmBlob);
+}
 
 async function getLoadedFfmpeg(): Promise<FFmpeg> {
   if (ffmpegInstance && ffmpegInstance.loaded) {
@@ -16,7 +38,7 @@ async function getLoadedFfmpeg(): Promise<FFmpeg> {
       const ffmpeg = new FFmpeg();
       const [coreURL, wasmURL] = await Promise.all([
         toBlobURL(coreUrlAsset, 'text/javascript'),
-        toBlobURL(wasmUrlAsset, 'application/wasm'),
+        loadChunkedFfmpegWasmUrl(),
       ]);
       await ffmpeg.load({ coreURL, wasmURL });
       ffmpegInstance = ffmpeg;
